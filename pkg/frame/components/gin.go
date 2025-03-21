@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/boloc/go-frame-server/pkg/constant"
-	"github.com/boloc/go-frame-server/pkg/frame/middleware"
 
 	"github.com/gin-gonic/gin"
 )
@@ -24,6 +23,8 @@ type GinComponent struct {
 	config *GinConfig
 	// 路由注册函数
 	routerRegistrar func(*gin.Engine)
+	// 全局中间件
+	middlewares []gin.HandlerFunc
 }
 
 // GinConfig Gin配置
@@ -75,6 +76,21 @@ func WithGinRouter(routerRegistrar func(*gin.Engine)) GinOption {
 	}
 }
 
+// WithGinMiddleware 添加全局中间件
+func WithGinMiddleware(middleware ...gin.HandlerFunc) GinOption {
+	return func(g *GinComponent) {
+		g.middlewares = append(g.middlewares, middleware...)
+	}
+}
+
+// Use 添加全局中间件
+func (g *GinComponent) Use(middleware ...gin.HandlerFunc) {
+	if g.engine != nil {
+		g.engine.Use(middleware...)
+	}
+	g.middlewares = append(g.middlewares, middleware...)
+}
+
 // NewGinComponent 创建Gin组件
 func NewGinComponent(opts ...GinOption) *GinComponent {
 	g := &GinComponent{
@@ -83,6 +99,7 @@ func NewGinComponent(opts ...GinOption) *GinComponent {
 			Mode:            gin.DebugMode,
 			ShutdownTimeout: 5 * time.Second,
 		},
+		middlewares: make([]gin.HandlerFunc, 0),
 	}
 
 	for _, opt := range opts {
@@ -94,11 +111,10 @@ func NewGinComponent(opts ...GinOption) *GinComponent {
 	// 创建Gin引擎
 	g.engine = gin.Default()
 
-	// 框架基前置中间件
-	g.engine.Use(
-		middleware.ContextMiddleware(), // 添加上下文中间件
-		// middleware.RecoveryMiddleware(), // 全局panic中间件
-	)
+	// 应用用户配置的中间件
+	if len(g.middlewares) > 0 {
+		g.engine.Use(g.middlewares...)
+	}
 
 	return g
 }
@@ -124,7 +140,7 @@ func (g *GinComponent) Start(ctx context.Context) error {
 	// 启动HTTP服务器
 	go func() {
 		//启动服务
-		fmt.Printf("服务启动 - 端口 %s\n", serverPort)
+		fmt.Printf("server start - port %s\n", serverPort)
 		if err := g.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Printf("Gin server error: %v", err)
 		}
@@ -135,7 +151,7 @@ func (g *GinComponent) Start(ctx context.Context) error {
 
 // Stop 停止Gin组件
 func (g *GinComponent) Stop(ctx context.Context) error {
-	fmt.Printf("停止服务: %s\n", g.config.Port)
+	fmt.Printf("server stop - port %s\n", g.config.Port)
 	if g.server != nil {
 		// 创建带超时的上下文
 		shutdownCtx, cancel := context.WithTimeout(ctx, g.config.ShutdownTimeout)

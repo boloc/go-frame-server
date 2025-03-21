@@ -4,11 +4,12 @@ import (
 	"context"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/datatypes"
 )
 
 type RequestContext struct {
-	DeviceID string
-	UserID   string
+	RequestQuery *datatypes.JSON `json:"request_query"`
+	RequestBody  *datatypes.JSON `json:"request_body"`
 	// 可以根据需要添加其他字段
 }
 

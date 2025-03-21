@@ -1,0 +1,83 @@
+# Server Configuration
+server:
+  env: local # local/test/production
+  name: go-github.com/boloc/go-frame-server
+  port: 10005
+
+# logs Configuration
+logs:
+  log_level: production # 日志级别
+  is_stdout: true # 是否输出到标准输出
+  is_file: true # 是否输出到文件
+  file_name: frame.log # 日志文件名
+  max_size: 100    # 单个文件最大尺寸，单位 MB
+  max_backups: 3    # 最多保留 60 个备份
+  max_age: 7    # 最多保留 30 天
+  compress: true # 是否压缩
+
+# Database Configuration
+database:
+  frame_server: # 数据库名称
+    # 通用配置
+    max_idle_conns: 10 # 设置空闲连接池中的最大连接数
+    max_open_conns: 100 # 设置打开数据库连接的最大数量
+    conn_max_lifetime: 1h0m0s # 设置连接可复用的最大时间 (类型为: time.Duration)
+    prefix: gm_
+    # 主库配置
+    master:
+      host: 192.168.1.30
+      port: 3306
+      name: frame_server
+      user: root
+      password: root
+      charset: utf8mb4
+      parse_time: true # true: 允许 MySQL 驱动将 MySQL 的 DATE 和 DATETIME 类型自动转换为 Go 的 time.Time 类型 false:时间类型会以字符串形式返回
+      loc: Local # 连接的时区 local:系统本地时区 （可以指定具体时区，如 Asia/Shanghai）
+    # slaves:
+    #   - host: 192.168.1.30 # 从库1
+    #     port: 3306
+    #     name: frame_server
+    #     user: root
+    #     password: root
+    #     charset: utf8mb4
+    #     parse_time: true # true: 允许 MySQL 驱动将 MySQL 的 DATE 和 DATETIME 类型自动转换为 Go 的 time.Time 类型 false:时间类型会以字符串形式返回
+    #     loc: Local # 连接的时区 local:系统本地时区 （可以指定具体时区，如 Asia/Shanghai）
+    #   - host: 192.168.1.30 # 从库2
+    #     port: 3306
+    #     name: shortlink
+    #     user: root
+    #     password: root
+    #     charset: utf8mb4
+    #     loc: Local # 连接的时区 local:系统本地时区 （可以指定具体时区，如 Asia/Shanghai）
+
+# Redis Configuration - cluster
+redis:
+  single:
+    addr: 192.168.1.10:6379
+    password: ""
+    min_idle_conns: 10 # 最小空闲连接数
+    db: 0
+  cluster:
+    pool_size: 10 # 连接池大小
+    timeout: 5s # 连 接超时时间
+    max_retries: 3 # 最大重试次数
+    min_idle_conns: 10 # 最小空闲连接数
+    route_randomly: true # 是否随机路由
+    # idle_timeout: 5m0s # 连接空闲超时时间
+    idle_timeout: 10s # 连接空闲超时时间
+    conn_timeout: 5s # 连接超时时间
+    read_timeout: 5s # 读取超时时间
+    write_timeout: 5s # 写入超时时间
+    min_retry_backoff: 100ms # 最小重试间隔时间
+    max_retry_backoff: 2s # 最大重试间隔时间
+    nodes:
+      - 192.168.1.6:7001
+      - 192.168.1.6:7002
+      - 192.168.1.6:7003
+      - 192.168.1.6:7004
+      - 192.168.1.6:7005
+      - 192.168.1.6:7006
+
+# prometheus相关
+prometheus:
+  password: ""

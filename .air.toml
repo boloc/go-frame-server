@@ -10,8 +10,8 @@ exclude_dir = ["assets", "tmp", "vendor", "testdata"]
 
 [build]
 # 修改构建命令和输出路径
-cmd = "go build -o ./tmp/shortlinkClient -ldflags='-s -w' cmd/client/main.go"
-bin = "./tmp/shortlinkClient"
+cmd = "go build -o ./tmp/frame-server -ldflags='-s -w' cmd/client/main.go"
+bin = "./tmp/frame-server"
 # 修改构建命令和输出路径 / 显示页面
 # cmd = "go build -o ./tmp/show -ldflags='-s -w' cmd/show/main.go"
 # bin = "./tmp/show"

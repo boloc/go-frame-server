@@ -10,6 +10,7 @@ import (
 	"github.com/boloc/go-frame-server/pkg/frame"
 	"github.com/boloc/go-frame-server/pkg/frame/components"
 	"github.com/boloc/go-frame-server/pkg/frame/config"
+	"github.com/boloc/go-frame-server/pkg/frame/middleware"
 	"github.com/boloc/go-frame-server/pkg/logger"
 	"github.com/boloc/go-frame-server/pkg/util"
 )
@@ -21,7 +22,7 @@ func main() {
 	)
 
 	// 注册配置组件
-	conf := config.MustLoad("shortlink", "./config")
+	conf := config.MustLoad("frame-server", "./config")
 	// 正常获取
 	// level := frame.GetConfig().GetString("logs.log_level")
 	// fmt.Println("打印日志级别", level)
@@ -132,6 +133,8 @@ func main() {
 		components.WithGinShutdownTimeout(5*time.Second),                               // 设置5秒关闭超时
 		components.WithGinRouter(route.RegisterRoutes),                                 // 注册路由
 	)
+	// 添加全局中间件
+	ginComponent.Use(middleware.ContextMiddleware())
 	f.RegisterComponent(ginComponent)
 	/******************** Gin组件 end ********************/
 
