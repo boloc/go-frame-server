@@ -1,7 +1,7 @@
 package frame
 
 import (
-	"frame-server/pkg/frame/components"
+	"go-frame-server/pkg/frame/components"
 
 	"gorm.io/gorm"
 )

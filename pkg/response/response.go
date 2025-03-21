@@ -2,12 +2,12 @@ package response
 
 import (
 	"fmt"
-	"frame-server/pkg/frame/config"
-	"frame-server/pkg/logger"
-	"frame-server/pkg/requests"
-	"frame-server/pkg/throw"
-	"frame-server/pkg/throw/enum"
-	"frame-server/pkg/throw/handler"
+	"go-frame-server/pkg/frame/config"
+	"go-frame-server/pkg/logger"
+	"go-frame-server/pkg/requests"
+	"go-frame-server/pkg/throw"
+	"go-frame-server/pkg/throw/enum"
+	"go-frame-server/pkg/throw/handler"
 	"net/http"
 
 	"runtime"
@@ -107,7 +107,7 @@ func formatStackTrace(stack string) []Stackconfig {
 		}
 
 		// 如果是函数调用行
-		if strings.HasPrefix(line, "frame-server/") || strings.HasPrefix(line, "github.com/") {
+		if strings.HasPrefix(line, "go-frame-server/") || strings.HasPrefix(line, "github.com/") {
 			config := Stackconfig{
 				Function: line,
 			}

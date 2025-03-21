@@ -2,7 +2,7 @@ package monitor
 
 import (
 	"fmt"
-	"frame-server/pkg/frame/config"
+	"go-frame-server/pkg/frame/config"
 	"runtime"
 	"strconv"
 	"time"

@@ -1,7 +1,7 @@
 # Server Configuration
 server:
   env: local
-  name: frame-server
+  name: go-frame-server
   port: 10005
 
 # logs Configuration

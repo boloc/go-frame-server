@@ -3,9 +3,9 @@ package route
 import (
 	"context"
 	"fmt"
-	"frame-server/pkg/frame"
-	"frame-server/pkg/frame/content"
-	"frame-server/pkg/util"
+	"go-frame-server/pkg/frame"
+	"go-frame-server/pkg/frame/content"
+	"go-frame-server/pkg/util"
 
 	"github.com/gin-gonic/gin"
 )

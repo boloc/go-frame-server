@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"time"
 
-	"frame-server/pkg/constant"
-	"frame-server/pkg/frame/middleware"
+	"go-frame-server/pkg/constant"
+	"go-frame-server/pkg/frame/middleware"
 
 	"github.com/gin-gonic/gin"
 )

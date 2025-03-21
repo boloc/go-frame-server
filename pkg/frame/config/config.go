@@ -2,7 +2,7 @@ package config
 
 import (
 	"fmt"
-	"frame-server/pkg/constant"
+	"go-frame-server/pkg/constant"
 	"log"
 	"sync"
 	"time"

@@ -3,7 +3,7 @@ package components
 import (
 	"context"
 	"fmt"
-	"frame-server/pkg/constant"
+	"go-frame-server/pkg/constant"
 	"sync"
 	"time"
 

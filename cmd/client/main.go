@@ -5,13 +5,13 @@ import (
 	"os"
 	"time"
 
-	"frame-server/cmd/client/route"
-	"frame-server/pkg/constant"
-	"frame-server/pkg/frame"
-	"frame-server/pkg/frame/components"
-	"frame-server/pkg/frame/config"
-	"frame-server/pkg/logger"
-	"frame-server/pkg/util"
+	"go-frame-server/cmd/client/route"
+	"go-frame-server/pkg/constant"
+	"go-frame-server/pkg/frame"
+	"go-frame-server/pkg/frame/components"
+	"go-frame-server/pkg/frame/config"
+	"go-frame-server/pkg/logger"
+	"go-frame-server/pkg/util"
 )
 
 func main() {

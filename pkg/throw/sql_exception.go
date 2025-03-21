@@ -1,8 +1,8 @@
 package throw
 
 import (
-	"frame-server/pkg/throw/enum"
-	"frame-server/pkg/throw/handler"
+	"go-frame-server/pkg/throw/enum"
+	"go-frame-server/pkg/throw/handler"
 
 	"github.com/go-sql-driver/mysql"
 )

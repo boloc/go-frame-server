@@ -1,7 +1,7 @@
 package middleware
 
 import (
-	"frame-server/pkg/response"
+	"go-frame-server/pkg/response"
 
 	"github.com/gin-gonic/gin"
 )

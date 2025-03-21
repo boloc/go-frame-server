@@ -1,4 +1,4 @@
-module frame-server
+module go-frame-server
 
 go 1.23.3
 
