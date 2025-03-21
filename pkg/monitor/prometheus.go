@@ -2,10 +2,11 @@ package monitor
 
 import (
 	"fmt"
-	"go-frame-server/pkg/frame/config"
 	"runtime"
 	"strconv"
 	"time"
+
+	"github.com/boloc/go-frame-server/pkg/frame/config"
 
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus"

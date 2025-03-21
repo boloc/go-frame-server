@@ -3,9 +3,10 @@ package components
 import (
 	"context"
 	"fmt"
-	"go-frame-server/pkg/constant"
 	"sync"
 	"time"
+
+	"github.com/boloc/go-frame-server/pkg/constant"
 
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"

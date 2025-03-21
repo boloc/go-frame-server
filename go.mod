@@ -1,4 +1,4 @@
-module go-frame-server
+module github.com/boloc/go-frame-server
 
 go 1.23.3
 

@@ -1,7 +1,7 @@
 # Server Configuration
 server:
   env: local
-  name: go-frame-server
+  name: github.com/boloc/go-frame-server
   port: 10005
 
 # logs Configuration

@@ -1,8 +1,8 @@
 package throw
 
 import (
-	"go-frame-server/pkg/throw/enum"
-	"go-frame-server/pkg/throw/handler"
+	"github.com/boloc/go-frame-server/pkg/throw/enum"
+	"github.com/boloc/go-frame-server/pkg/throw/handler"
 
 	"github.com/go-playground/validator/v10"
 )

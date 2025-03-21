@@ -2,10 +2,11 @@ package config
 
 import (
 	"fmt"
-	"go-frame-server/pkg/constant"
 	"log"
 	"sync"
 	"time"
+
+	"github.com/boloc/go-frame-server/pkg/constant"
 
 	"github.com/spf13/viper"
 )

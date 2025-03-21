@@ -2,13 +2,14 @@ package response
 
 import (
 	"fmt"
-	"go-frame-server/pkg/frame/config"
-	"go-frame-server/pkg/logger"
-	"go-frame-server/pkg/requests"
-	"go-frame-server/pkg/throw"
-	"go-frame-server/pkg/throw/enum"
-	"go-frame-server/pkg/throw/handler"
 	"net/http"
+
+	"github.com/boloc/go-frame-server/pkg/frame/config"
+	"github.com/boloc/go-frame-server/pkg/logger"
+	"github.com/boloc/go-frame-server/pkg/requests"
+	"github.com/boloc/go-frame-server/pkg/throw"
+	"github.com/boloc/go-frame-server/pkg/throw/enum"
+	"github.com/boloc/go-frame-server/pkg/throw/handler"
 
 	"runtime"
 	"strconv"
@@ -107,7 +108,7 @@ func formatStackTrace(stack string) []Stackconfig {
 		}
 
 		// 如果是函数调用行
-		if strings.HasPrefix(line, "go-frame-server/") || strings.HasPrefix(line, "github.com/") {
+		if strings.HasPrefix(line, "github.com/boloc/go-frame-server/") || strings.HasPrefix(line, "github.com/") {
 			config := Stackconfig{
 				Function: line,
 			}

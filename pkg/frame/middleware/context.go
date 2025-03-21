@@ -1,7 +1,7 @@
 package middleware
 
 import (
-	"go-frame-server/pkg/frame/content"
+	"github.com/boloc/go-frame-server/pkg/frame/content"
 
 	"github.com/gin-gonic/gin"
 )

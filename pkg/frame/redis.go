@@ -1,7 +1,7 @@
 package frame
 
 import (
-	"go-frame-server/pkg/frame/components"
+	"github.com/boloc/go-frame-server/pkg/frame/components"
 
 	"github.com/redis/go-redis/v9"
 )

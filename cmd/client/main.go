@@ -5,13 +5,13 @@ import (
 	"os"
 	"time"
 
-	"go-frame-server/cmd/client/route"
-	"go-frame-server/pkg/constant"
-	"go-frame-server/pkg/frame"
-	"go-frame-server/pkg/frame/components"
-	"go-frame-server/pkg/frame/config"
-	"go-frame-server/pkg/logger"
-	"go-frame-server/pkg/util"
+	"github.com/boloc/go-frame-server/cmd/client/route"
+	"github.com/boloc/go-frame-server/pkg/constant"
+	"github.com/boloc/go-frame-server/pkg/frame"
+	"github.com/boloc/go-frame-server/pkg/frame/components"
+	"github.com/boloc/go-frame-server/pkg/frame/config"
+	"github.com/boloc/go-frame-server/pkg/logger"
+	"github.com/boloc/go-frame-server/pkg/util"
 )
 
 func main() {
