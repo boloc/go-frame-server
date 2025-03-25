@@ -20,6 +20,9 @@ type Component interface {
 	Stop(ctx context.Context) error
 }
 
+// Hook 定义钩子函数类型
+type Hook func(ctx context.Context) error
+
 // FrameConfig 框架配置
 type FrameConfig struct {
 	ShutdownTimeout time.Duration
@@ -41,6 +44,10 @@ type Frame struct {
 	logger     *zap.Logger
 	config     *FrameConfig
 	mu         sync.RWMutex
+
+	// 钩子函数
+	afterStartHooks []Hook
+	beforeStopHooks []Hook
 }
 
 // New 创建新的框架实例
@@ -50,12 +57,30 @@ func New(opts ...Option) *Frame {
 		config: &FrameConfig{
 			ShutdownTimeout: 30 * time.Second, // 默认30秒超时
 		},
+		afterStartHooks: make([]Hook, 0),
+		beforeStopHooks: make([]Hook, 0),
 	}
 
 	for _, opt := range opts {
 		opt(f)
 	}
 
+	return f
+}
+
+// AfterStart 注册启动后的钩子函数
+func (f *Frame) AfterStart(hook Hook) *Frame {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.afterStartHooks = append(f.afterStartHooks, hook)
+	return f
+}
+
+// BeforeStop 注册停止前的钩子函数
+func (f *Frame) BeforeStop(hook Hook) *Frame {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.beforeStopHooks = append(f.beforeStopHooks, hook)
 	return f
 }
 
@@ -86,6 +111,16 @@ func (f *Frame) Run() error {
 		f.logger.Info("Framework started successfully")
 	}
 
+	// 执行启动后的钩子函数
+	for _, hook := range f.afterStartHooks {
+		if err := hook(ctx); err != nil {
+			if f.logger != nil {
+				f.logger.Error("Error executing after start hook", zap.Error(err))
+			}
+			return err
+		}
+	}
+
 	// 设置信号处理
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -95,6 +130,16 @@ func (f *Frame) Run() error {
 	fmt.Println("\n收到 Ctrl+C，正在退出...")
 	if f.logger != nil {
 		f.logger.Debug("接收到退出信号", zap.String("信号signal", sig.String()))
+	}
+
+	// 执行停止前的钩子函数
+	for _, hook := range f.beforeStopHooks {
+		if err := hook(ctx); err != nil {
+			if f.logger != nil {
+				f.logger.Error("Error executing before stop hook", zap.Error(err))
+			}
+			// 继续执行其他钩子，但记录错误
+		}
 	}
 
 	// 优雅关闭

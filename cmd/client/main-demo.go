@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"time"
@@ -137,6 +138,25 @@ func main() {
 	ginComponent.Use(middleware.ContextMiddleware())
 	f.RegisterComponent(ginComponent)
 	/******************** Gin组件 end ********************/
+
+	// 注册启动后的操作
+	f.AfterStart(func(ctx context.Context) error {
+		// 在这里执行启动后的操作
+		fmt.Println("框架启动后执行1...")
+		return nil
+	})
+	f.AfterStart(func(ctx context.Context) error {
+		// 在这里执行启动后的操作
+		fmt.Println("框架启动后执行2...")
+		return nil
+	})
+
+	// 注册停止前的操作
+	f.BeforeStop(func(ctx context.Context) error {
+		// 在这里执行停止前的操作
+		fmt.Println("框架停止前执行...")
+		return nil
+	})
 
 	// 运行框架
 	if err := f.Run(); err != nil {
