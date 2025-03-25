@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"net/url"
 	"reflect"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 
 // 拼接mysqlDSN
 func BuildMysqlDSN(dbMap map[string]any) string {
+	loc := url.QueryEscape(fmt.Sprint(dbMap["loc"]))
 	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=True&loc=%s",
 		dbMap["user"],
 		dbMap["password"],
@@ -21,7 +23,7 @@ func BuildMysqlDSN(dbMap map[string]any) string {
 		dbMap["port"],
 		dbMap["name"],
 		dbMap["charset"],
-		dbMap["loc"],
+		loc,
 	)
 }
 

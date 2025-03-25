@@ -72,16 +72,21 @@ func (c *ConfigComponent) Load() error {
 }
 
 // GetViper 获取Viper实例
+// @return *viper.Viper Viper实例
 func (c *ConfigComponent) GetViper() *viper.Viper {
 	return c.viper
 }
 
 // Get 获取配置
+// @param key string 配置名
+// @return interface{} 配置值
 func (c *ConfigComponent) Get(key string) interface{} {
 	return c.viper.Get(key)
 }
 
 // GetString 获取字符串配置
+// @param key string 配置名
+// @return string 字符串
 func (c *ConfigComponent) GetString(key string) string {
 	return c.viper.GetString(key)
 }
@@ -92,28 +97,43 @@ func (c *ConfigComponent) GetInt(key string) int {
 }
 
 // GetBool 获取布尔配置
+
 func (c *ConfigComponent) GetBool(key string) bool {
 	return c.viper.GetBool(key)
 }
 
 // Unmarshal 将配置反序列化到结构体
+// @param rawVal interface{} 结构体
+// @return error 错误
 func (c *ConfigComponent) Unmarshal(rawVal interface{}) error {
 	return c.viper.Unmarshal(rawVal)
 }
 
+// GetStringMap 获取字符串映射
+// @param key string 配置名
+// @return map[string]any 字符串映射
 func (c *ConfigComponent) GetStringMap(key string) map[string]any {
 	return c.viper.GetStringMap(key)
 }
 
+// GetStringTimeDuration 获取字符串时间
+// @param key string 配置名
+// @return time.Duration 时间
 func (c *ConfigComponent) GetStringTimeDuration(key string) time.Duration {
 	return c.viper.GetDuration(key)
 }
 
+// GetStringSlice 获取字符串切片
+// @param key string 配置名
+// @return []string 字符串切片
 func (c *ConfigComponent) GetStringSlice(key string) []string {
 	return c.viper.GetStringSlice(key)
 }
 
 // MustLoad 创建并加载配置，如果出错则panic
+// @param confName string 配置名
+// @param confPath string 配置路径(默认: ./config 项目根目录下)
+// @return *ConfigComponent 配置组件
 func MustLoad(confName, confPath string) *ConfigComponent {
 	conf := NewConfig(confName, confPath)
 	if err := conf.Load(); err != nil {
