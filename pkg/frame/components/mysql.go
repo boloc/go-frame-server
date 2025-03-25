@@ -17,7 +17,7 @@ import (
 // MySQLConfig MySQL配置
 type MySQLConfig struct {
 	MasterDSN       string
-	SlaveDSNs       []string // 修改为切片，支持多个从库
+	SlavesDSN       []string // 修改为切片，支持多个从库
 	MaxIdleConns    int
 	MaxOpenConns    int
 	ConnMaxLifetime time.Duration
@@ -93,7 +93,7 @@ func (m *MySQLComponent) Start(ctx context.Context) error {
 	m.master = master
 
 	// 连接从库们
-	for _, slaveDSN := range m.config.SlaveDSNs {
+	for _, slaveDSN := range m.config.SlavesDSN {
 		replica, err := m.connectDB(slaveDSN)
 		if err != nil {
 			return fmt.Errorf("failed to connect to slave(%s): %v", slaveDSN, err)

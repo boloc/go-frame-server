@@ -105,7 +105,7 @@ func (c *ConfigComponent) GetStringMap(key string) map[string]any {
 	return c.viper.GetStringMap(key)
 }
 
-func (c *ConfigComponent) GetSrtingTimeDuration(key string) time.Duration {
+func (c *ConfigComponent) GetStringTimeDuration(key string) time.Duration {
 	return c.viper.GetDuration(key)
 }
 

@@ -46,27 +46,27 @@ func main() {
 
 	/******************** 数据库组件 start ********************/
 	// 组装主库dsn
-	databasename := constant.DefaultDBName
-	dbMapStr := fmt.Sprintf("database.%s", databasename)
+	dataBaseName := constant.DefaultDBName
+	dbMapStr := fmt.Sprintf("database.%s", dataBaseName)
 	dbMap := conf.GetStringMap(dbMapStr)
 	masterDSN := util.BuildMysqlDSN(dbMap["master"].(map[string]any))
 
 	// 组装从库dsn
-	slaveDSNs := []string{}
+	slavesDSN := []string{}
 	if dbMap["slaves"] != nil {
 		for _, slave := range dbMap["slaves"].([]any) {
-			slaveDSNs = append(slaveDSNs, util.BuildMysqlDSN(slave.(map[string]any)))
+			slavesDSN = append(slavesDSN, util.BuildMysqlDSN(slave.(map[string]any)))
 		}
 	}
 	// 创建MySQL组件
 	mysqlComponent := components.NewMySQLComponent(
-		databasename,
+		dataBaseName,
 		&components.MySQLConfig{
 			MasterDSN:       masterDSN,
-			SlaveDSNs:       slaveDSNs, // 传入多个从库DSN
+			SlavesDSN:       slavesDSN, // 传入多个从库DSN
 			MaxIdleConns:    dbMap["max_idle_conns"].(int),
 			MaxOpenConns:    dbMap["max_open_conns"].(int),
-			ConnMaxLifetime: conf.GetSrtingTimeDuration(dbMap["conn_max_lifetime"].(string)),
+			ConnMaxLifetime: conf.GetStringTimeDuration(dbMap["conn_max_lifetime"].(string)),
 			Prefix:          dbMap["prefix"].(string),
 			LogLevel:        components.GormLogLevelForEnv(conf.GetString("server.env")),
 		},
@@ -75,22 +75,22 @@ func main() {
 	f.RegisterComponent(mysqlComponent)
 
 	// // 支持注册多个数据库(主从都可，避免一个项目包含多个数据库问题)
-	// mysqlComponenta := components.NewMySQLComponent(
-	// 	"a",
+	// mysqlComponentAnother := components.NewMySQLComponent(
+	// 	"another",
 	// 	&components.MySQLConfig{
 	// 		MasterDSN:       masterDSN,
-	// 		SlaveDSNs:       slaveDSNs, // 传入多个从库DSN
+	// 		SlavesDSN:       slavesDSN, // 传入多个从库DSN
 	// 		MaxIdleConns:    dbMap["max_idle_conns"].(int),
 	// 		MaxOpenConns:    dbMap["max_open_conns"].(int),
-	// 		ConnMaxLifetime: conf.GetSrtingTimeDuration(dbMap["conn_max_lifetime"].(string)),
+	// 		ConnMaxLifetime: conf.GetStringTimeDuration(dbMap["conn_max_lifetime"].(string)),
 	// 		Prefix:          dbMap["prefix"].(string),
 	// 		LogLevel:        components.GormLogLevelForEnv(conf.GetString("server.env")),
 	// 	},
 	// 	false, // 是否默认
 	// )
-	// f.RegisterComponent(mysqlComponenta)
-	// 获取从库
-	// dbSlave := frame.SlaveDB("a")
+	// f.RegisterComponent(mysqlComponentAnother)
+	// // 获取从库模型结果
+	// dbSlave := frame.SlaveDB("another")
 	// var v []map[string]any
 	// dbSlave.Model(&model.ShortLinkRelationship{}).Find(&v)
 	// fmt.Println("打印db结果", v)
@@ -112,14 +112,14 @@ func main() {
 	// redisClusterComponent := components.NewRedisClusterComponent(
 	// 	components.WithClusterAddrs(conf.GetStringSlice("redis.cluster.nodes")),                              // 设置集群节点
 	// 	components.WithClusterPoolSize(conf.GetInt("redis.cluster.pool_size")),                               // 设置连接池大小
-	// 	components.WithClusterTimeout(conf.GetSrtingTimeDuration("redis.cluster.timeout")),                   // 设置连接超时时间
+	// 	components.WithClusterTimeout(conf.GetStringTimeDuration("redis.cluster.timeout")),                   // 设置连接超时时间
 	// 	components.WithClusterMaxRetries(conf.GetInt("redis.cluster.max_retries")),                           // 设置最大重试次数
 	// 	components.WithClusterMinIdleConns(conf.GetInt("redis.cluster.min_idle_conns")),                      // 设置最小空闲连接数
 	// 	components.WithClusterRouteRandomly(conf.GetBool("redis.cluster.route_randomly")),                    // 设置是否随机路由
-	// 	components.WithClusterMinRetryBackoff(conf.GetSrtingTimeDuration("redis.cluster.min_retry_backoff")), // 设置最小重试间隔时间
-	// 	components.WithClusterMaxRetryBackoff(conf.GetSrtingTimeDuration("redis.cluster.max_retry_backoff")), // 设置最大重试间隔时间
-	// 	components.WithClusterReadTimeout(conf.GetSrtingTimeDuration("redis.cluster.read_timeout")),          // 设置读取超时时间
-	// 	components.WithClusterWriteTimeout(conf.GetSrtingTimeDuration("redis.cluster.write_timeout")),        // 设置写入超时时间
+	// 	components.WithClusterMinRetryBackoff(conf.GetStringTimeDuration("redis.cluster.min_retry_backoff")), // 设置最小重试间隔时间
+	// 	components.WithClusterMaxRetryBackoff(conf.GetStringTimeDuration("redis.cluster.max_retry_backoff")), // 设置最大重试间隔时间
+	// 	components.WithClusterReadTimeout(conf.GetStringTimeDuration("redis.cluster.read_timeout")),          // 设置读取超时时间
+	// 	components.WithClusterWriteTimeout(conf.GetStringTimeDuration("redis.cluster.write_timeout")),        // 设置写入超时时间
 	// )
 	// f.RegisterComponent(redisClusterComponent)
 
