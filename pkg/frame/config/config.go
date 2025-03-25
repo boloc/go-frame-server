@@ -96,8 +96,22 @@ func (c *ConfigComponent) GetInt(key string) int {
 	return c.viper.GetInt(key)
 }
 
-// GetBool 获取布尔配置
+// GetInt64 获取int64配置
+func (c *ConfigComponent) GetInt64(key string) int64 {
+	return c.viper.GetInt64(key)
+}
 
+// GetInt32 获取int32配置
+func (c *ConfigComponent) GetInt32(key string) int32 {
+	return c.viper.GetInt32(key)
+}
+
+// GetUint 获取uint配置
+func (c *ConfigComponent) GetUint(key string) uint {
+	return c.viper.GetUint(key)
+}
+
+// GetBool 获取布尔配置
 func (c *ConfigComponent) GetBool(key string) bool {
 	return c.viper.GetBool(key)
 }
