@@ -25,7 +25,7 @@ func main() {
 	// 注册配置组件
 	conf := config.MustLoad("frame-server", "./config")
 	// 正常获取
-	// level := frame.GetConfig().GetString("logs.log_level")
+	// level := config.GetConfig().GetString("logs.log_level")
 	// fmt.Println("打印日志级别", level)
 
 	/* 日志组件 */

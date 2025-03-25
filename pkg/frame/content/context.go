@@ -8,6 +8,7 @@ import (
 )
 
 type RequestContext struct {
+	ginContext   *gin.Context    // gin上下文
 	RequestQuery *datatypes.JSON `json:"request_query"`
 	RequestBody  *datatypes.JSON `json:"request_body"`
 	// 可以根据需要添加其他字段
@@ -17,7 +18,9 @@ type contextKey string
 
 // FromGin 直接从 gin.Context 获取自定义上下文
 func FromGin(c *gin.Context) *RequestContext {
-	return FromContext(c.Request.Context())
+	rc := FromContext(c.Request.Context())
+	rc.ginContext = c
+	return rc
 }
 
 // FromContext 从标准 context 获取
