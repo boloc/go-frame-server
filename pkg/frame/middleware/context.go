@@ -40,7 +40,7 @@ func ContextMiddleware() gin.HandlerFunc {
 		rc := &content.RequestContext{
 			RequestQuery: &requestQuery,
 			RequestBody:  &requestBody,
-			// 可以添加更多字段
+			CustomData:   make(map[string]any), // 初始化CustomData
 		}
 		c.Request = c.Request.WithContext(content.NewContext(c.Request.Context(), rc))
 		c.Next()

@@ -11,11 +11,27 @@ import (
 func RegisterRoutes(r *gin.Engine) {
 	r.GET("/health", func(c *gin.Context) {
 		ctx := content.FromGin(c)
-		queryCtx := ctx.RequestQuery
-		fmt.Println("打印ctx query", queryCtx)
-		// // db := frame.GetDefaultDB()
-		bodyCtx := ctx.RequestBody
-		fmt.Println("打印ctx body", bodyCtx)
+		ctx.Set("test", "test")
+		// queryCtx := ctx.RequestQuery
+		// fmt.Println("打印ctx query", queryCtx)
+		// // // db := frame.GetDefaultDB()
+		// bodyCtx := ctx.RequestBody
+		// fmt.Println("打印ctx body", bodyCtx)
+		test, _ := ctx.Get("test")
+		Tss(c, test.(string))
+		if test, exists := ctx.Get("test"); exists {
+			fmt.Println("打印自定义参数test ", test)
+
+		} else {
+			fmt.Println("自定义参数test 不存在")
+		}
+		customData, exists := ctx.GetString("test")
+		Tss(c, customData)
+		fmt.Println("打印自定义数据string", customData, exists)
 		c.JSON(200, gin.H{"message": "ok"})
 	})
+}
+
+func Tss(c *gin.Context, req string) {
+	fmt.Println("打印req", req)
 }
