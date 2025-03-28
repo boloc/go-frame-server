@@ -18,9 +18,9 @@ func SqlException(err error) error {
 		return nil
 	}
 
+	// 获取错误路径和函数名
+	ErrorPath, Function := handler.ErrorCaller()
 	if err, ok := err.(*mysql.MySQLError); ok {
-		// 获取错误路径和函数名
-		ErrorPath, Function := handler.ErrorCaller()
 		sqlError := &SqlError{
 			ExceptionError: &handler.ExceptionError{
 				Code:      enum.SQL_ERROR,

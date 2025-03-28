@@ -30,12 +30,14 @@ func GormLogLevelForEnv(env string) logger.LogLevel {
 	switch env {
 	case constant.EnvLocal:
 		return logger.Info
+	case constant.EnvDev:
+		return logger.Warn
 	case constant.EnvTest:
-		return logger.Error
+		return logger.Warn
 	case constant.EnvProd:
 		return logger.Error
 	default:
-		return logger.Error
+		return logger.Warn
 	}
 }
 

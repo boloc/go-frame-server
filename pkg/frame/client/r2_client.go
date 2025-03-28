@@ -261,10 +261,23 @@ func (r *R2Client) UploadMultipartFile(ctx context.Context, file *multipart.File
 	}
 	defer srcFile.Close()
 
+	// 获取文件扩展名
+	ext := filepath.Ext(file.Filename)
 	// 如果未提供对象键，则使用文件名
 	if objectKey == "" {
 		// 生成唯一文件名以避免冲突
 		fileName := filepath.Base(file.Filename)
+
+		// 处理文件名过长的情况
+		const maxFileNameLength = 20 // 最大文件名长度
+		if len(fileName) > maxFileNameLength {
+			// 保留扩展名，但截断主文件名部分
+			fileNameWithoutExt := fileName[:len(fileName)-len(ext)]
+			// 截断文件名并保留扩展名
+			truncatedName := fileNameWithoutExt[:maxFileNameLength-len(ext)] + ext
+			fileName = truncatedName
+		}
+
 		objectKey = fmt.Sprintf("uploads/%s-%s-%s",
 			time.Now().Format("20060102"),
 			uuid.New().String()[:8],
@@ -276,7 +289,6 @@ func (r *R2Client) UploadMultipartFile(ctx context.Context, file *multipart.File
 		contentType = file.Header.Get("Content-Type")
 		// 如果 Header 中没有，根据扩展名推断
 		if contentType == "" {
-			ext := filepath.Ext(file.Filename)
 			contentType = getContentTypeFromExt(ext)
 		}
 	}

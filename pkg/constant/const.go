@@ -3,6 +3,7 @@ package constant
 // 系统可选的环境变量
 const (
 	EnvLocal = "local"
+	EnvDev   = "dev"
 	EnvTest  = "test"
 	EnvProd  = "production"
 )
