@@ -36,5 +36,5 @@ func SqlException(err error) error {
 		sqlError.Number = err.Number
 		return sqlError
 	}
-	return err
+	return sqlError
 }
