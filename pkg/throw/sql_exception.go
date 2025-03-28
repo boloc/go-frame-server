@@ -20,16 +20,20 @@ func SqlException(err error) error {
 
 	// 获取错误路径和函数名
 	ErrorPath, Function := handler.ErrorCaller()
+
+	// 初始化错误信息
+	sqlError := &SqlError{
+		ExceptionError: &handler.ExceptionError{
+			Code:      enum.SQL_ERROR,
+			ErrorMsg:  err.Error(), // sql的错误信息
+			ErrorPath: ErrorPath,
+			Function:  Function,
+		},
+	}
+
+	// 获取Sql错误码
 	if err, ok := err.(*mysql.MySQLError); ok {
-		sqlError := &SqlError{
-			ExceptionError: &handler.ExceptionError{
-				Code:      enum.SQL_ERROR,
-				ErrorMsg:  err.Error(), // sql的错误信息
-				ErrorPath: ErrorPath,
-				Function:  Function,
-			},
-			Number: err.Number,
-		}
+		sqlError.Number = err.Number
 		return sqlError
 	}
 	return err
