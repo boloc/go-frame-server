@@ -8,7 +8,7 @@ import (
 )
 
 type RequestContext struct {
-	ginContext   *gin.Context    // gin上下文
+	GinContext   *gin.Context    // gin上下文
 	RequestQuery *datatypes.JSON `json:"request_query"`
 	RequestBody  *datatypes.JSON `json:"request_body"`
 	// 添加一个通用的map用于存储自定义数据
@@ -20,7 +20,7 @@ type contextKey string
 // FromGin 直接从 gin.Context 获取自定义上下文
 func FromGin(c *gin.Context) *RequestContext {
 	rc := FromContext(c.Request.Context())
-	rc.ginContext = c
+	rc.GinContext = c
 	return rc
 }
 
