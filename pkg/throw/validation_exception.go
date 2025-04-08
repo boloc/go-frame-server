@@ -67,5 +67,5 @@ func ValidationException(err error, msg ...string) error {
 		}
 		return validationError
 	}
-	return err
+	return validationError
 }
