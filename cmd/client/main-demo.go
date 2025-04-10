@@ -14,6 +14,8 @@ import (
 	"github.com/boloc/go-frame-server/pkg/frame/middleware"
 	"github.com/boloc/go-frame-server/pkg/logger"
 	"github.com/boloc/go-frame-server/pkg/util"
+
+	"github.com/ClickHouse/clickhouse-go/v2"
 )
 
 func main() {
@@ -125,6 +127,38 @@ func main() {
 	// f.RegisterComponent(redisClusterComponent)
 
 	/******************** Redis组件 end ********************/
+
+	/******************** ClickHouse组件 start ********************/
+	// 注册ClickHouse组件
+	// 配置样例 - 如果未配置，请先在config文件中添加相应配置
+	// clickhouse:
+	//   default:
+	//     addr: "localhost:9000"
+	//     database: "default"
+	//     username: "default"
+	//     password: ""
+	//     max_open_conns: 10
+	//     max_idle_conns: 5
+	//     conn_max_lifetime: "1h"
+	//     dial_timeout: "10s"
+	//     debug: true
+	clickhouseComponent := components.NewClickHouseComponent(
+		"shortlink",
+		true,
+		components.WithClickHouseAddress([]string{conf.GetString("clickhouse.default.addr")}),                        // 设置ClickHouse地址
+		components.WithClickHouseDatabase(conf.GetString("clickhouse.default.database")),                             // 设置数据库名
+		components.WithClickHouseUsername(conf.GetString("clickhouse.default.username")),                             // 设置用户名
+		components.WithClickHousePassword(conf.GetString("clickhouse.default.password")),                             // 设置密码
+		components.WithClickHouseMaxOpenConns(conf.GetInt("clickhouse.default.max_open_conns")),                      // 设置最大连接数
+		components.WithClickHouseMaxIdleConns(conf.GetInt("clickhouse.default.max_idle_conns")),                      // 设置最大空闲连接数
+		components.WithClickHouseConnMaxLifetime(conf.GetStringTimeDuration("clickhouse.default.conn_max_lifetime")), // 设置连接最大生命周期
+		components.WithClickHouseDialTimeout(conf.GetStringTimeDuration("clickhouse.default.dial_timeout")),          // 设置连接超时时间
+		components.WithClickHouseCompression(clickhouse.CompressionLZ4),                                              // 设置压缩方式
+		components.WithClickHouseDebug(conf.GetBool("clickhouse.default.debug")),                                     // 设置调试
+	)
+
+	f.RegisterComponent(clickhouseComponent)
+	/******************** ClickHouse组件 end ********************/
 
 	/******************** Gin组件 start ********************/
 	// 注册Gin组件

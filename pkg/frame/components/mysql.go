@@ -51,42 +51,64 @@ type MySQLComponent struct {
 }
 
 var (
-	mysqlInstances = make(map[string]*MySQLComponent)
-	DefaultDB      *MySQLComponent // 添加默认实例
-	mu             sync.RWMutex
+	mysqlInstances     = make(map[string]*MySQLComponent)
+	mysqlInstancesOnce = make(map[string]*sync.Once)
+	DefaultDB          *MySQLComponent // 添加默认实例
+	mu                 sync.RWMutex
 )
 
 // NewMySQLComponent 创建MySQL组件
 func NewMySQLComponent(name string, config *MySQLConfig, isDefault bool) *MySQLComponent {
-	if config.MaxIdleConns == 0 {
-		config.MaxIdleConns = 10
-	}
-	if config.MaxOpenConns == 0 {
-		config.MaxOpenConns = 100
-	}
-	if config.ConnMaxLifetime == 0 {
-		config.ConnMaxLifetime = time.Hour
-	}
-	if config.LogLevel == 0 {
-		config.LogLevel = logger.Info
-	}
-
-	m := &MySQLComponent{
-		config: config,
-	}
-
 	mu.Lock()
-	mysqlInstances[name] = m
-	if isDefault {
-		DefaultDB = m
+	if _, exist := mysqlInstancesOnce[name]; !exist {
+		mysqlInstancesOnce[name] = &sync.Once{}
 	}
+	once := mysqlInstancesOnce[name]
 	mu.Unlock()
 
-	return m
+	once.Do(func() {
+		if config.MaxIdleConns == 0 {
+			config.MaxIdleConns = 10
+		}
+		if config.MaxOpenConns == 0 {
+			config.MaxOpenConns = 100
+		}
+		if config.ConnMaxLifetime == 0 {
+			config.ConnMaxLifetime = time.Hour
+		}
+		if config.LogLevel == 0 {
+			config.LogLevel = logger.Info
+		}
+
+		m := &MySQLComponent{
+			config: config,
+		}
+
+		mu.Lock()
+		mysqlInstances[name] = m
+		if isDefault {
+			DefaultDB = m
+		}
+		mu.Unlock()
+	})
+
+	mu.RLock()
+	instance := mysqlInstances[name]
+	mu.RUnlock()
+
+	return instance
 }
 
 // Start 启动MySQL组件
 func (m *MySQLComponent) Start(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// 如果已经连接主库，则跳过
+	if m.master != nil {
+		return nil
+	}
+
 	// 连接主库
 	master, err := m.connectDB(m.config.MasterDSN)
 	if err != nil {
@@ -139,6 +161,9 @@ func (m *MySQLComponent) connectDB(dsn string) (*gorm.DB, error) {
 
 // Stop 停止MySQL组件
 func (m *MySQLComponent) Stop(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	// 关闭主库
 	if m.master != nil {
 		if sqlDB, err := m.master.DB(); err == nil {
@@ -157,6 +182,8 @@ func (m *MySQLComponent) Stop(ctx context.Context) error {
 
 // Master 获取主库连接
 func (m *MySQLComponent) Master() *gorm.DB {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	return m.master
 }
 
@@ -175,7 +202,6 @@ func (m *MySQLComponent) Slave() *gorm.DB {
 
 // 默认实例的全局访问方法
 func GetDefaultDB() *gorm.DB {
-	// 获取这个结构体内所有参数
 	if DefaultDB == nil {
 		panic("default MySQL instance not initialized")
 	}
