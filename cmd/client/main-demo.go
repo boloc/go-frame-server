@@ -131,17 +131,6 @@ func main() {
 	/******************** ClickHouse组件 start ********************/
 	// 注册ClickHouse组件
 	// 配置样例 - 如果未配置，请先在config文件中添加相应配置
-	// clickhouse:
-	//   default:
-	//     addr: "localhost:9000"
-	//     database: "default"
-	//     username: "default"
-	//     password: ""
-	//     max_open_conns: 10
-	//     max_idle_conns: 5
-	//     conn_max_lifetime: "1h"
-	//     dial_timeout: "10s"
-	//     debug: true
 	clickhouseComponent := components.NewClickHouseComponent(
 		"shortlink",
 		true,
@@ -160,6 +149,36 @@ func main() {
 	)
 
 	f.RegisterComponent(clickhouseComponent)
+
+	// // 注册ClickHouse DSN组件
+	// clickhouseDSNComponent := components.NewClickHouseComponent(
+	// 	"shortlink",
+	// 	true,
+	// 	components.WithClickHouseDSN(conf.GetString("clickhouse.default.dsn")),
+	// )
+	// f.RegisterComponent(clickhouseDSNComponent)
+
+	// // 注册ClickHouse GORM组件
+	// clickhouseDSN := util.BuildClickhouseDSN(map[string]any{
+	// 	"user":     conf.GetString("clickhouse.default.username"), // 用户名
+	// 	"password": conf.GetString("clickhouse.default.password"), // 密码
+	// 	"host":     conf.GetString("clickhouse.default.host"),     // 地址
+	// 	"port":     conf.GetString("clickhouse.default.port"),     // 端口
+	// 	"name":     conf.GetString("clickhouse.default.database"), // 数据库
+	// 	"loc":      "UTC",                                         // 时区
+	// })
+	// clickhouseGorm := components.NewClickHouseGORMComponent(
+	// 	"shortlink",
+	// 	&components.ClickHouseGORMConfig{
+	// 		DSN:             clickhouseDSN,
+	// 		MaxIdleConns:    conf.GetInt("clickhouse.default.max_idle_conns"),                   // 最大空闲连接数
+	// 		MaxOpenConns:    conf.GetInt("clickhouse.default.max_open_conns"),                   // 最大连接数
+	// 		ConnMaxLifetime: conf.GetStringTimeDuration("clickhouse.default.conn_max_lifetime"), // 连接最大生命周期
+	// 		LogLevel:        components.GormLogLevelForEnv(constant.EnvLocal),                    // 日志等级                                                // 日志级别
+	// 	},
+	// 	true, // 设为默认实例
+	// )
+	// f.RegisterComponent(clickhouseGorm)
 	/******************** ClickHouse组件 end ********************/
 
 	/******************** Gin组件 start ********************/

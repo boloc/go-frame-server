@@ -25,6 +25,7 @@ type ClickHouseConfig struct {
 	Compression     *clickhouse.Compression // 压缩方式
 	Debug           bool                    // 调试
 	Protocol        string                  // 协议类型：native 或 http
+	DSN             string                  // 直接设置DSN连接字符串
 }
 
 // ClickHouseComponent ClickHouse组件
@@ -131,6 +132,13 @@ func WithClickHouseProtocol(protocol string) ClickHouseOption {
 	}
 }
 
+// WithClickHouseDSN 直接设置DSN连接字符串
+func WithClickHouseDSN(dsn string) ClickHouseOption {
+	return func(c *ClickHouseConfig) {
+		c.DSN = dsn
+	}
+}
+
 // NewClickHouseComponent 创建ClickHouse组件
 func NewClickHouseComponent(name string, isDefault bool, opts ...ClickHouseOption) *ClickHouseComponent {
 	clickhouseMu.Lock()
@@ -192,37 +200,65 @@ func (c *ClickHouseComponent) Start(ctx context.Context) error {
 		return nil
 	}
 
-	var protocol clickhouse.Protocol
-	if c.config.Protocol == "http" {
-		protocol = clickhouse.HTTP
+	var options *clickhouse.Options
+	var err error
+
+	// 如果设置了DSN，优先使用DSN
+	if c.config.DSN != "" {
+		// 尝试解析DSN
+		fmt.Printf("使用DSN连接: %s\n", c.config.DSN)
+		options, err = clickhouse.ParseDSN(c.config.DSN)
+		if err != nil {
+			return fmt.Errorf("failed to parse DSN: %v", err)
+		}
 	} else {
-		protocol = clickhouse.Native
+		// 确定协议类型
+		var protocol clickhouse.Protocol
+		if c.config.Protocol == "http" {
+			protocol = clickhouse.HTTP
+		} else {
+			protocol = clickhouse.Native
+		}
+
+		// 打印当前配置信息，便于调试
+		fmt.Printf("ClickHouse连接信息:\n")
+		fmt.Printf("地址: %v\n", c.config.Address)
+		fmt.Printf("数据库: %s\n", c.config.Database)
+		fmt.Printf("用户名: %s\n", c.config.Username)
+		fmt.Printf("协议: %s\n", c.config.Protocol)
+		fmt.Printf("超时: %s\n", c.config.DialTimeout)
+
+		// 构建连接选项
+		options = &clickhouse.Options{
+			Protocol: protocol,
+			Addr:     c.config.Address, // 地址
+			Auth: clickhouse.Auth{
+				Database: c.config.Database, // 数据库
+				Username: c.config.Username, // 用户名
+				Password: c.config.Password, // 密码
+			},
+			DialTimeout:     c.config.DialTimeout,     // 连接超时时间
+			MaxOpenConns:    c.config.MaxOpenConns,    // 最大连接数
+			MaxIdleConns:    c.config.MaxIdleConns,    // 最大空闲连接数
+			ConnMaxLifetime: c.config.ConnMaxLifetime, // 连接最大生命周期
+			Compression:     c.config.Compression,     // 压缩方式
+			ReadTimeout:     c.config.ReadTimeout,     // 读取超时时间
+		}
 	}
 
-	options := &clickhouse.Options{
-		Protocol: protocol,
-		Addr:     c.config.Address, // 地址
-		Auth: clickhouse.Auth{
-			Database: c.config.Database, // 数据库
-			Username: c.config.Username, // 用户名
-			Password: c.config.Password, // 密码
-		},
-		DialTimeout:     c.config.DialTimeout,     // 连接超时时间
-		MaxOpenConns:    c.config.MaxOpenConns,    // 最大连接数
-		MaxIdleConns:    c.config.MaxIdleConns,    // 最大空闲连接数
-		ConnMaxLifetime: c.config.ConnMaxLifetime, // 连接最大生命周期
-		Compression:     c.config.Compression,     // 压缩方式
-		Debug:           c.config.Debug,           // 调试
-		ReadTimeout:     c.config.ReadTimeout,     // 读取超时时间
-		Debugf: func(format string, v ...interface{}) { // 打印SQL(只有当Debug为true时，才会执行)
+	// 设置调试模式
+	if c.config.Debug {
+		options.Debug = true
+		options.Debugf = func(format string, v ...interface{}) { // 打印SQL(只有当Debug为true时，才会执行)
 			msg := fmt.Sprintf(format, v...)
 			if strings.Contains(msg, "send query") {
 				// 使用ANSI颜色代码：绿色文本
 				fmt.Printf("\033[32m执行的ClickHouse SQL: %s\033[0m\n", msg)
 			}
-		},
+		}
 	}
 
+	// 尝试打开连接
 	conn, err := clickhouse.Open(options)
 	if err != nil {
 		return fmt.Errorf("failed to connect to ClickHouse: %v", err)

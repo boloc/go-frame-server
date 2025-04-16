@@ -36,6 +36,8 @@ func GormLogLevelForEnv(env string) logger.LogLevel {
 		return logger.Warn
 	case constant.EnvProd:
 		return logger.Error
+	case constant.EnvSilent:
+		return logger.Silent
 	default:
 		return logger.Warn
 	}

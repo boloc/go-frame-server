@@ -27,6 +27,19 @@ func BuildMysqlDSN(dbMap map[string]any) string {
 	)
 }
 
+// 拼接clickhouseDSN
+func BuildClickhouseDSN(dbMap map[string]any) string {
+	loc := url.QueryEscape(fmt.Sprint(dbMap["loc"]))
+	return fmt.Sprintf("http://%s:%s@%s:%s/%s?loc=%s",
+		dbMap["user"],
+		dbMap["password"],
+		dbMap["host"],
+		dbMap["port"],
+		dbMap["name"],
+		loc,
+	)
+}
+
 // 获取客户端IP
 func GetClientIP(c *gin.Context) string {
 	return c.ClientIP()
