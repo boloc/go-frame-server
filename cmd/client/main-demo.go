@@ -153,8 +153,10 @@ func main() {
 		components.WithClickHouseMaxIdleConns(conf.GetInt("clickhouse.default.max_idle_conns")),                      // 设置最大空闲连接数
 		components.WithClickHouseConnMaxLifetime(conf.GetStringTimeDuration("clickhouse.default.conn_max_lifetime")), // 设置连接最大生命周期
 		components.WithClickHouseDialTimeout(conf.GetStringTimeDuration("clickhouse.default.dial_timeout")),          // 设置连接超时时间
+		components.WithClickHouseReadTimeout(conf.GetStringTimeDuration("clickhouse.default.read_timeout")),          // 设置读取超时时间
 		components.WithClickHouseCompression(clickhouse.CompressionLZ4),                                              // 设置压缩方式
 		components.WithClickHouseDebug(conf.GetBool("clickhouse.default.debug")),                                     // 设置调试
+		components.WithClickHouseProtocol(conf.GetString("clickhouse.default.protocol")),                             // 设置协议
 	)
 
 	f.RegisterComponent(clickhouseComponent)

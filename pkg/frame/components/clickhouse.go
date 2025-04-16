@@ -21,8 +21,10 @@ type ClickHouseConfig struct {
 	MaxIdleConns    int                     // 最大空闲连接数
 	ConnMaxLifetime time.Duration           // 连接最大生命周期
 	DialTimeout     time.Duration           // 连接超时时间
+	ReadTimeout     time.Duration           // 读取超时时间
 	Compression     *clickhouse.Compression // 压缩方式
 	Debug           bool                    // 调试
+	Protocol        string                  // 协议类型：native 或 http
 }
 
 // ClickHouseComponent ClickHouse组件
@@ -105,6 +107,13 @@ func WithClickHouseDialTimeout(dialTimeout time.Duration) ClickHouseOption {
 	}
 }
 
+// WithClickHouseReadTimeout 设置读取超时时间
+func WithClickHouseReadTimeout(readTimeout time.Duration) ClickHouseOption {
+	return func(c *ClickHouseConfig) {
+		c.ReadTimeout = readTimeout
+	}
+}
+
 // WithClickHouseCompression 设置压缩方式
 func WithClickHouseCompression(method clickhouse.CompressionMethod) ClickHouseOption {
 	return func(c *ClickHouseConfig) {
@@ -112,6 +121,13 @@ func WithClickHouseCompression(method clickhouse.CompressionMethod) ClickHouseOp
 			Method: method,
 			Level:  0, // 使用默认压缩级别
 		}
+	}
+}
+
+// WithClickHouseProtocol 设置ClickHouse协议
+func WithClickHouseProtocol(protocol string) ClickHouseOption {
+	return func(c *ClickHouseConfig) {
+		c.Protocol = protocol
 	}
 }
 
@@ -134,11 +150,13 @@ func NewClickHouseComponent(name string, isDefault bool, opts ...ClickHouseOptio
 			MaxIdleConns:    5,
 			ConnMaxLifetime: time.Hour,
 			DialTimeout:     10 * time.Second,
+			ReadTimeout:     20 * time.Second,
 			Compression: &clickhouse.Compression{
 				Method: clickhouse.CompressionLZ4,
 				Level:  0, // 使用默认压缩级别
 			},
-			Debug: false,
+			Debug:    false,
+			Protocol: "native", // 默认使用native协议
 		}
 
 		for _, opt := range opts {
@@ -174,8 +192,16 @@ func (c *ClickHouseComponent) Start(ctx context.Context) error {
 		return nil
 	}
 
+	var protocol clickhouse.Protocol
+	if c.config.Protocol == "http" {
+		protocol = clickhouse.HTTP
+	} else {
+		protocol = clickhouse.Native
+	}
+
 	options := &clickhouse.Options{
-		Addr: c.config.Address, // 地址
+		Protocol: protocol,
+		Addr:     c.config.Address, // 地址
 		Auth: clickhouse.Auth{
 			Database: c.config.Database, // 数据库
 			Username: c.config.Username, // 用户名
@@ -187,6 +213,7 @@ func (c *ClickHouseComponent) Start(ctx context.Context) error {
 		ConnMaxLifetime: c.config.ConnMaxLifetime, // 连接最大生命周期
 		Compression:     c.config.Compression,     // 压缩方式
 		Debug:           c.config.Debug,           // 调试
+		ReadTimeout:     c.config.ReadTimeout,     // 读取超时时间
 		Debugf: func(format string, v ...interface{}) { // 打印SQL(只有当Debug为true时，才会执行)
 			msg := fmt.Sprintf(format, v...)
 			if strings.Contains(msg, "send query") {
