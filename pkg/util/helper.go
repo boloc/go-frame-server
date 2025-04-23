@@ -15,10 +15,14 @@ import (
 
 // 拼接mysqlDSN
 func BuildMysqlDSN(dbMap map[string]any) string {
+	// URL 编码用户名和密码以处理特殊字符
+	username := url.QueryEscape(fmt.Sprint(dbMap["user"]))
+	password := url.QueryEscape(fmt.Sprint(dbMap["password"]))
 	loc := url.QueryEscape(fmt.Sprint(dbMap["loc"]))
+
 	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=True&loc=%s",
-		dbMap["user"],
-		dbMap["password"],
+		username,
+		password,
 		dbMap["host"],
 		dbMap["port"],
 		dbMap["name"],
@@ -29,10 +33,14 @@ func BuildMysqlDSN(dbMap map[string]any) string {
 
 // 拼接clickhouseDSN
 func BuildClickhouseDSN(dbMap map[string]any) string {
+	// URL 编码用户名和密码以处理特殊字符
+	username := url.QueryEscape(fmt.Sprint(dbMap["user"]))
+	password := url.QueryEscape(fmt.Sprint(dbMap["password"]))
 	loc := url.QueryEscape(fmt.Sprint(dbMap["loc"]))
+
 	return fmt.Sprintf("http://%s:%s@%s:%s/%s?loc=%s",
-		dbMap["user"],
-		dbMap["password"],
+		username,
+		password,
 		dbMap["host"],
 		dbMap["port"],
 		dbMap["name"],
