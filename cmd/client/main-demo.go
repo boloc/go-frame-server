@@ -14,8 +14,6 @@ import (
 	"github.com/boloc/go-frame-server/pkg/frame/middleware"
 	"github.com/boloc/go-frame-server/pkg/logger"
 	"github.com/boloc/go-frame-server/pkg/util"
-
-	"github.com/ClickHouse/clickhouse-go/v2"
 )
 
 func main() {
@@ -131,54 +129,45 @@ func main() {
 	/******************** ClickHouse组件 start ********************/
 	// 注册ClickHouse组件
 	// 配置样例 - 如果未配置，请先在config文件中添加相应配置
-	clickhouseComponent := components.NewClickHouseComponent(
-		"shortlink",
-		true,
-		components.WithClickHouseAddress([]string{conf.GetString("clickhouse.default.addr")}),                        // 设置ClickHouse地址
-		components.WithClickHouseDatabase(conf.GetString("clickhouse.default.database")),                             // 设置数据库名
-		components.WithClickHouseUsername(conf.GetString("clickhouse.default.username")),                             // 设置用户名
-		components.WithClickHousePassword(conf.GetString("clickhouse.default.password")),                             // 设置密码
-		components.WithClickHouseMaxOpenConns(conf.GetInt("clickhouse.default.max_open_conns")),                      // 设置最大连接数
-		components.WithClickHouseMaxIdleConns(conf.GetInt("clickhouse.default.max_idle_conns")),                      // 设置最大空闲连接数
-		components.WithClickHouseConnMaxLifetime(conf.GetStringTimeDuration("clickhouse.default.conn_max_lifetime")), // 设置连接最大生命周期
-		components.WithClickHouseDialTimeout(conf.GetStringTimeDuration("clickhouse.default.dial_timeout")),          // 设置连接超时时间
-		components.WithClickHouseReadTimeout(conf.GetStringTimeDuration("clickhouse.default.read_timeout")),          // 设置读取超时时间
-		components.WithClickHouseCompression(clickhouse.CompressionLZ4),                                              // 设置压缩方式
-		components.WithClickHouseDebug(conf.GetBool("clickhouse.default.debug")),                                     // 设置调试
-		components.WithClickHouseProtocol(conf.GetString("clickhouse.default.protocol")),                             // 设置协议
-	)
-
-	f.RegisterComponent(clickhouseComponent)
-
-	// // 注册ClickHouse DSN组件
-	// clickhouseDSNComponent := components.NewClickHouseComponent(
+	// clickhouseComponent := components.NewClickHouseComponent(
 	// 	"shortlink",
 	// 	true,
-	// 	components.WithClickHouseDSN(conf.GetString("clickhouse.default.dsn")),
+	// 	components.WithClickHouseAddress([]string{conf.GetString("clickhouse.default.addr")}),                        // 设置ClickHouse地址
+	// 	components.WithClickHouseDatabase(conf.GetString("clickhouse.default.database")),                             // 设置数据库名
+	// 	components.WithClickHouseUsername(conf.GetString("clickhouse.default.username")),                             // 设置用户名
+	// 	components.WithClickHousePassword(conf.GetString("clickhouse.default.password")),                             // 设置密码
+	// 	components.WithClickHouseMaxOpenConns(conf.GetInt("clickhouse.default.max_open_conns")),                      // 设置最大连接数
+	// 	components.WithClickHouseMaxIdleConns(conf.GetInt("clickhouse.default.max_idle_conns")),                      // 设置最大空闲连接数
+	// 	components.WithClickHouseConnMaxLifetime(conf.GetStringTimeDuration("clickhouse.default.conn_max_lifetime")), // 设置连接最大生命周期
+	// 	components.WithClickHouseDialTimeout(conf.GetStringTimeDuration("clickhouse.default.dial_timeout")),          // 设置连接超时时间
+	// 	components.WithClickHouseReadTimeout(conf.GetStringTimeDuration("clickhouse.default.read_timeout")),          // 设置读取超时时间
+	// 	components.WithClickHouseCompression(clickhouse.CompressionLZ4),                                              // 设置压缩方式
+	// 	components.WithClickHouseDebug(conf.GetBool("clickhouse.default.debug")),                                     // 设置调试
+	// 	components.WithClickHouseProtocol(conf.GetString("clickhouse.default.protocol")),                             // 设置协议
 	// )
-	// f.RegisterComponent(clickhouseDSNComponent)
 
-	// // 注册ClickHouse GORM组件
-	// clickhouseDSN := util.BuildClickhouseDSN(map[string]any{
-	// 	"user":     conf.GetString("clickhouse.default.username"), // 用户名
-	// 	"password": conf.GetString("clickhouse.default.password"), // 密码
-	// 	"host":     conf.GetString("clickhouse.default.host"),     // 地址
-	// 	"port":     conf.GetString("clickhouse.default.port"),     // 端口
-	// 	"name":     conf.GetString("clickhouse.default.database"), // 数据库
-	// 	"loc":      "UTC",                                         // 时区
-	// })
-	// clickhouseGorm := components.NewClickHouseGORMComponent(
-	// 	"shortlink",
-	// 	&components.ClickHouseGORMConfig{
-	// 		DSN:             clickhouseDSN,
-	// 		MaxIdleConns:    conf.GetInt("clickhouse.default.max_idle_conns"),                   // 最大空闲连接数
-	// 		MaxOpenConns:    conf.GetInt("clickhouse.default.max_open_conns"),                   // 最大连接数
-	// 		ConnMaxLifetime: conf.GetStringTimeDuration("clickhouse.default.conn_max_lifetime"), // 连接最大生命周期
-	// 		LogLevel:        components.GormLogLevelForEnv(constant.EnvLocal),                    // 日志等级                                                // 日志级别
-	// 	},
-	// 	true, // 设为默认实例
-	// )
-	// f.RegisterComponent(clickhouseGorm)
+	// f.RegisterComponent(clickhouseComponent)
+
+	// 注册ClickHouse GORM组件
+	clickhouseDSN := util.BuildClickhouseDSN(map[string]any{
+		"user":     conf.GetString("clickhouse.default.username"), // 用户名
+		"password": conf.GetString("clickhouse.default.password"), // 密码
+		"host":     conf.GetString("clickhouse.default.host"),     // 地址
+		"port":     conf.GetString("clickhouse.default.port"),     // 端口
+		"name":     conf.GetString("clickhouse.default.database"), // 数据库
+	})
+	clickhouseGorm := components.NewClickHouseGORMComponent(
+		"shortlink",
+		&components.ClickHouseGORMConfig{
+			DSN:             clickhouseDSN,
+			MaxIdleConns:    conf.GetInt("clickhouse.default.max_idle_conns"),                              // 最大空闲连接数
+			MaxOpenConns:    conf.GetInt("clickhouse.default.max_open_conns"),                              // 最大连接数
+			ConnMaxLifetime: conf.GetStringTimeDuration("clickhouse.default.conn_max_lifetime"),            // 连接最大生命周期
+			LogLevel:        components.GormLogLevelForEnv(conf.GetString("clickhouse.default.log_level")), // 日志等级
+		},
+		true, // 设为默认实例
+	)
+	f.RegisterComponent(clickhouseGorm)
 	/******************** ClickHouse组件 end ********************/
 
 	/******************** Gin组件 start ********************/

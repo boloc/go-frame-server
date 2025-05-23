@@ -109,7 +109,14 @@ func NewGinComponent(opts ...GinOption) *GinComponent {
 	// 设置Gin模式
 	gin.SetMode(g.config.Mode)
 	// 创建Gin引擎
-	g.engine = gin.Default()
+	g.engine = gin.New()
+
+	if g.config.Mode == gin.DebugMode {
+		// 添加日志中间件
+		g.engine.Use(gin.Logger())
+	}
+	// 添加恢复中间件，但不添加日志中间件
+	g.engine.Use(gin.Recovery())
 
 	// 应用用户配置的中间件
 	if len(g.middlewares) > 0 {

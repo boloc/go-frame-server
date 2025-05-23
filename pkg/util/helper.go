@@ -36,15 +36,13 @@ func BuildClickhouseDSN(dbMap map[string]any) string {
 	// URL 编码用户名和密码以处理特殊字符
 	username := url.QueryEscape(fmt.Sprint(dbMap["user"]))
 	password := url.QueryEscape(fmt.Sprint(dbMap["password"]))
-	loc := url.QueryEscape(fmt.Sprint(dbMap["loc"]))
 
-	return fmt.Sprintf("http://%s:%s@%s:%s/%s?loc=%s",
+	return fmt.Sprintf("http://%s:%s@%s:%s/%s",
 		username,
 		password,
 		dbMap["host"],
 		dbMap["port"],
 		dbMap["name"],
-		loc,
 	)
 }
 
