@@ -131,6 +131,23 @@ func (c *ConfigComponent) GetStringSlice(key string) []string {
 	return c.viper.GetStringSlice(key)
 }
 
+//	将字符串值解析为 time.Duration
+//
+// 用于已从配置解析出的字符串值，如 "1h", "30m", "5s"
+//
+// @param value string 时间字符串
+// @return time.Duration 时间
+func ParseDuration(value string) time.Duration {
+	if value == "" {
+		return 0
+	}
+	d, err := time.ParseDuration(value)
+	if err != nil {
+		return 0
+	}
+	return d
+}
+
 //	加载配置文件（单例），如果出错则panic
 //
 // @param configFile string 配置文件完整路径，如: ./config/frame-server.yml

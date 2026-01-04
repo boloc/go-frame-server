@@ -45,11 +45,11 @@ func SetupClickHouse(f *frame.Frame, conf *config.ConfigComponent) {
 	clickhouseGorm := components.NewClickHouseGORMComponent(
 		chName,
 		&components.ClickHouseGORMConfig{
-			DSN:             clickhouseDSN,                                        // DSN连接字符串
-			MaxIdleConns:    chConfig.MaxIdleConns,                                // 最大空闲连接数
-			MaxOpenConns:    chConfig.MaxOpenConns,                                // 最大打开连接数
-			ConnMaxLifetime: conf.GetStringTimeDuration(chConfig.ConnMaxLifetime), // 连接最大生命周期
-			LogLevel:        components.GormLogLevelForEnv(chConfig.LogLevel),     // 日志级别
+			DSN:             clickhouseDSN,                                    // DSN连接字符串
+			MaxIdleConns:    chConfig.MaxIdleConns,                            // 最大空闲连接数
+			MaxOpenConns:    chConfig.MaxOpenConns,                            // 最大打开连接数
+			ConnMaxLifetime: config.ParseDuration(chConfig.ConnMaxLifetime),   // 连接最大生命周期
+			LogLevel:        components.GormLogLevelForEnv(chConfig.LogLevel), // 日志级别
 		},
 		true,
 	)

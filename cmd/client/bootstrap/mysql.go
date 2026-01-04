@@ -44,7 +44,7 @@ func SetupMySQL(f *frame.Frame, conf *config.ConfigComponent) {
 			SlavesDSN:       slavesDSN,
 			MaxIdleConns:    dbConfig.MaxIdleConns,
 			MaxOpenConns:    dbConfig.MaxOpenConns,
-			ConnMaxLifetime: conf.GetStringTimeDuration(dbConfig.ConnMaxLifetime),
+			ConnMaxLifetime: config.ParseDuration(dbConfig.ConnMaxLifetime),
 			Prefix:          dbConfig.Prefix,
 			LogLevel:        components.GormLogLevelForEnv(conf.GetString("server.env")),
 		},
