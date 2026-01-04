@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/boloc/go-frame-server/cmd/client/bootstrap"
+	"github.com/boloc/go-frame-server/cmd/example/bootstrap"
 	"github.com/boloc/go-frame-server/pkg/frame"
 )
 

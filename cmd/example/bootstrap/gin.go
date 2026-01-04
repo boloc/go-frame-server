@@ -3,7 +3,7 @@ package bootstrap
 import (
 	"time"
 
-	"github.com/boloc/go-frame-server/cmd/client/route"
+	"github.com/boloc/go-frame-server/cmd/example/route"
 	"github.com/boloc/go-frame-server/pkg/frame"
 	"github.com/boloc/go-frame-server/pkg/frame/components"
 	"github.com/boloc/go-frame-server/pkg/frame/config"

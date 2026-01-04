@@ -7,7 +7,7 @@ tmp_dir = "tmp"
 [build]
   args_bin = []
   # bin = "./tmp/main"
-  cmd = "go build -o ./tmp/main-demo -ldflags='-s -w' cmd/client/main-demo.go"
+  cmd = "go build -o ./tmp/main-demo -ldflags='-s -w' cmd/example/main-demo.go"
   entrypoint = ["./tmp/main-demo","-c","./config/frame-server.yml"]
   exclude_dir = ["assets", "tmp", "vendor", "testdata"]
   delay = 1000 # 构建延迟时间，单位毫秒

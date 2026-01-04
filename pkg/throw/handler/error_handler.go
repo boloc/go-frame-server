@@ -19,8 +19,8 @@ func (e *ExceptionError) Error() string {
 
 // 记录错误调用者信息
 func ErrorCaller() (string, string) {
-	// 获取错误路径和函数名
-	pc, file, line, ok := runtime.Caller(2)
+	// 获取调用 throw.XxxException 的业务代码位置
+	pc, file, line, ok := runtime.Caller(3)
 	var ErrorPath string
 	var Function string
 	if ok {
