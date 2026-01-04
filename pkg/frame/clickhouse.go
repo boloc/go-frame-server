@@ -7,22 +7,22 @@ import (
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 )
 
-// 默认实例的全局访问方法
+// DefaultClickHouse 获取默认ClickHouse原生连接
 func DefaultClickHouse() driver.Conn {
 	return components.GetDefaultClickHouse()
 }
 
-// 指定名称的ClickHouse实例访问方法
+// ClickHouse 获取指定名称的ClickHouse原生连接
 func ClickHouse(name string) driver.Conn {
 	return components.GetClickHouse(name)
 }
 
 // DefaultClickHouseDB 获取默认ClickHouse GORM DB
 func DefaultClickHouseDB() *gorm.DB {
-	return components.GetDefaultClickHouseGORM()
+	return components.DefaultClickHouseDB()
 }
 
 // ClickHouseDB 获取指定名称的ClickHouse GORM DB
 func ClickHouseDB(name string) *gorm.DB {
-	return components.GetClickHouseGORMDB(name)
+	return components.ClickHouseDB(name)
 }

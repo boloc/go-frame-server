@@ -19,6 +19,7 @@ require (
 	go.uber.org/zap v1.27.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	gorm.io/datatypes v1.2.5
+	gorm.io/driver/clickhouse v0.6.1
 	gorm.io/driver/mysql v1.5.7
 	gorm.io/gorm v1.25.12
 )
@@ -93,5 +94,4 @@ require (
 	golang.org/x/text v0.23.0 // indirect
 	google.golang.org/protobuf v1.36.5 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	gorm.io/driver/clickhouse v0.6.1 // indirect
 )

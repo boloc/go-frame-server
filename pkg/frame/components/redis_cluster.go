@@ -48,10 +48,10 @@ func WithClusterMinIdleConns(minIdleConns int) RedisClusterOption {
 	}
 }
 
-// WithClusterTimeout 设置集群连接超时时间
-func WithClusterTimeout(timeout time.Duration) RedisClusterOption {
+// WithClusterDialTimeout 设置集群连接超时时间
+func WithClusterDialTimeout(dialTimeout time.Duration) RedisClusterOption {
 	return func(r *RedisClusterComponent) {
-		r.config.DialTimeout = timeout
+		r.config.DialTimeout = dialTimeout
 	}
 }
 
@@ -129,7 +129,6 @@ func NewRedisClusterComponent(opts ...RedisClusterOption) *RedisClusterComponent
 func (r *RedisClusterComponent) Start(ctx context.Context) error {
 	r.client = redis.NewClusterClient(r.config)
 	if err := r.client.Ping(ctx).Err(); err != nil {
-		fmt.Println("打印错误ctx", ctx)
 		return fmt.Errorf("failed to connect to redis cluster: %v", err)
 	}
 	return nil

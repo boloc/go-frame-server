@@ -22,6 +22,22 @@ type ClickHouseGORMConfig struct {
 	Prefix          string          // 表前缀
 }
 
+// applyDefaults 设置默认值
+func (c *ClickHouseGORMConfig) applyDefaults() {
+	if c.MaxIdleConns == 0 {
+		c.MaxIdleConns = 5
+	}
+	if c.MaxOpenConns == 0 {
+		c.MaxOpenConns = 10
+	}
+	if c.ConnMaxLifetime == 0 {
+		c.ConnMaxLifetime = time.Hour
+	}
+	if c.LogLevel == 0 {
+		c.LogLevel = logger.Warn
+	}
+}
+
 // ClickHouseGORMComponent ClickHouse GORM组件
 type ClickHouseGORMComponent struct {
 	db     *gorm.DB
@@ -32,7 +48,7 @@ type ClickHouseGORMComponent struct {
 var (
 	clickhouseGormInstances     = make(map[string]*ClickHouseGORMComponent)
 	clickhouseGormInstancesOnce = make(map[string]*sync.Once)
-	DefaultClickHouseGORM       *ClickHouseGORMComponent // 默认实例
+	defaultClickHouseGORM       *ClickHouseGORMComponent
 	clickhouseGormMu            sync.RWMutex
 )
 
@@ -46,21 +62,10 @@ func NewClickHouseGORMComponent(name string, config *ClickHouseGORMConfig, isDef
 	clickhouseGormMu.Unlock()
 
 	once.Do(func() {
-		if config.MaxIdleConns == 0 {
-			config.MaxIdleConns = 5
-		}
-		if config.MaxOpenConns == 0 {
-			config.MaxOpenConns = 10
-		}
-		if config.ConnMaxLifetime == 0 {
-			config.ConnMaxLifetime = time.Hour
-		}
-		if config.LogLevel == 0 {
-			config.LogLevel = logger.Warn
-		}
+		// 兜底设置默认值
+		config.applyDefaults()
 
-		// 打印日志等级
-		fmt.Printf("ClickHouse GORM组件[%s]日志等级: %v\n", name, config.LogLevel)
+		// 创建组件
 		c := &ClickHouseGORMComponent{
 			config: config,
 		}
@@ -68,7 +73,7 @@ func NewClickHouseGORMComponent(name string, config *ClickHouseGORMConfig, isDef
 		clickhouseGormMu.Lock()
 		clickhouseGormInstances[name] = c
 		if isDefault {
-			DefaultClickHouseGORM = c
+			defaultClickHouseGORM = c
 		}
 		clickhouseGormMu.Unlock()
 	})
@@ -124,10 +129,6 @@ func (c *ClickHouseGORMComponent) Start(ctx context.Context) error {
 	}
 
 	c.db = db
-
-	// 输出连接信息
-	fmt.Printf("ClickHouse GORM连接成功: maxIdleConn:%d, maxOpenConn:%d\n",
-		c.config.MaxIdleConns, c.config.MaxOpenConns)
 	return nil
 }
 
@@ -156,16 +157,20 @@ func (c *ClickHouseGORMComponent) DB() *gorm.DB {
 	return c.db
 }
 
-// GetDefaultClickHouseGORM 获取默认ClickHouse GORM DB
-func GetDefaultClickHouseGORM() *gorm.DB {
-	if DefaultClickHouseGORM == nil {
+// ==================== 默认实例访问方法 ====================
+
+// 获取默认ClickHouse GORM DB
+func DefaultClickHouseDB() *gorm.DB {
+	if defaultClickHouseGORM == nil {
 		panic("default ClickHouse GORM instance not initialized")
 	}
-	return DefaultClickHouseGORM.DB()
+	return defaultClickHouseGORM.DB()
 }
 
-// GetClickHouseGORMDB 获取指定名称的ClickHouse GORM DB
-func GetClickHouseGORMDB(name string) *gorm.DB {
+// ==================== 命名实例访问方法 ====================
+
+// 获取指定名称的ClickHouse GORM DB
+func ClickHouseDB(name string) *gorm.DB {
 	clickhouseGormMu.RLock()
 	instance, ok := clickhouseGormInstances[name]
 	clickhouseGormMu.RUnlock()

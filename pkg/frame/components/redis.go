@@ -97,6 +97,13 @@ func WithRedisMaxRetryBackoff(maxRetryBackoff time.Duration) RedisOption {
 	}
 }
 
+// WithRedisDialTimeout 设置连接超时时间
+func WithRedisDialTimeout(dialTimeout time.Duration) RedisOption {
+	return func(r *RedisComponent) {
+		r.config.DialTimeout = dialTimeout
+	}
+}
+
 // NewRedisComponent 创建Redis组件
 func NewRedisComponent(opts ...RedisOption) *RedisComponent {
 	r := &RedisComponent{

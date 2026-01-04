@@ -2,6 +2,7 @@ package frame
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os"
 	"os/signal"
@@ -9,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/boloc/go-frame-server/pkg/frame/config"
 	"go.uber.org/zap"
 )
 
@@ -26,6 +28,7 @@ type Hook func(ctx context.Context) error
 // FrameConfig 框架配置
 type FrameConfig struct {
 	ShutdownTimeout time.Duration
+	ConfigFile      string // 配置文件路径
 }
 
 // Option 定义框架选项函数类型
@@ -38,11 +41,19 @@ func WithShutdownTimeout(timeout time.Duration) Option {
 	}
 }
 
+// WithConfigFile 设置配置文件路径（可被 -c 命令行参数覆盖）
+func WithConfigFile(configFile string) Option {
+	return func(f *Frame) {
+		f.config.ConfigFile = configFile
+	}
+}
+
 // Frame 框架核心结构
 type Frame struct {
 	components []Component
 	logger     *zap.Logger
 	config     *FrameConfig
+	appConfig  *config.ConfigComponent // 应用配置
 	mu         sync.RWMutex
 
 	// 钩子函数
@@ -61,11 +72,30 @@ func New(opts ...Option) *Frame {
 		beforeStopHooks: make([]Hook, 0),
 	}
 
+	// 应用所有选项
 	for _, opt := range opts {
 		opt(f)
 	}
 
+	// 加载配置文件
+	// 优先级：环境变量 CONFIG_FILE > -c 命令行参数 > 默认值
+	envConfig := os.Getenv("CONFIG_FILE")
+	if envConfig != "" {
+		// 环境变量优先级最高
+		f.appConfig = config.MustLoadFile(envConfig)
+	} else if f.config.ConfigFile != "" { // 配置文件路径
+		// 解析 -c 命令行参数
+		configFile := flag.String("c", f.config.ConfigFile, "配置文件路径")
+		flag.Parse()
+		f.appConfig = config.MustLoadFile(*configFile)
+	}
+
 	return f
+}
+
+// Config 获取应用配置
+func (f *Frame) Config() *config.ConfigComponent {
+	return f.appConfig
 }
 
 // AfterStart 注册启动后的钩子函数

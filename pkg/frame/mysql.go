@@ -6,31 +6,22 @@ import (
 	"gorm.io/gorm"
 )
 
-// 默认实例的全局访问方法
+// DefaultDB 获取默认实例的主库连接
 func DefaultDB() *gorm.DB {
-	// 获取这个结构体内所有参数
-	if components.DefaultDB == nil {
-		panic("default MySQL instance not initialized")
-	}
-	return components.DefaultDB.Master()
+	return components.DefaultMasterDB()
 }
 
-// 默认实例的从库访问方法
+// DefaultSlaveDB 获取默认实例的从库连接
 func DefaultSlaveDB() *gorm.DB {
-	if components.DefaultDB == nil {
-		panic("default MySQL instance not initialized")
-	}
-	return components.DefaultDB.Slave()
+	return components.DefaultSlaveDB()
 }
 
-// 保留原有的命名实例访问方法
-func DB(name string) *gorm.DB {
-	instance := components.GetMySQLComponent(name)
-	return instance.Master()
+// MasterDB 获取指定实例的主库连接
+func MasterDB(name string) *gorm.DB {
+	return components.MasterDB(name)
 }
 
-// ReplicaDB 获取从库连接
+// SlaveDB 获取指定实例的从库连接
 func SlaveDB(name string) *gorm.DB {
-	instance := components.GetMySQLComponent(name)
-	return instance.Slave()
+	return components.SlaveDB(name)
 }

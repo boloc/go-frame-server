@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/boloc/go-frame-server/pkg/constant"
@@ -17,12 +18,28 @@ import (
 // MySQLConfig MySQL配置
 type MySQLConfig struct {
 	MasterDSN       string
-	SlavesDSN       []string // 修改为切片，支持多个从库
+	SlavesDSN       []string // 支持多个从库
 	MaxIdleConns    int
 	MaxOpenConns    int
 	ConnMaxLifetime time.Duration
 	LogLevel        logger.LogLevel
 	Prefix          string
+}
+
+// applyDefaults 设置默认值
+func (c *MySQLConfig) applyDefaults() {
+	if c.MaxIdleConns == 0 {
+		c.MaxIdleConns = 10
+	}
+	if c.MaxOpenConns == 0 {
+		c.MaxOpenConns = 100
+	}
+	if c.ConnMaxLifetime == 0 {
+		c.ConnMaxLifetime = time.Hour
+	}
+	if c.LogLevel == 0 {
+		c.LogLevel = logger.Info
+	}
 }
 
 // GormLogLevelForEnv 根据环境变量设置Gorm日志级别
@@ -48,55 +65,46 @@ type MySQLComponent struct {
 	master   *gorm.DB
 	replicas []*gorm.DB
 	config   *MySQLConfig
-	current  int
+	current  uint32 // 使用 uint32 配合 atomic
 	mu       sync.RWMutex
 }
 
 var (
 	mysqlInstances     = make(map[string]*MySQLComponent)
 	mysqlInstancesOnce = make(map[string]*sync.Once)
-	DefaultDB          *MySQLComponent // 添加默认实例
-	mu                 sync.RWMutex
+	defaultMySQLDB     *MySQLComponent
+	mysqlMu            sync.RWMutex
 )
 
 // NewMySQLComponent 创建MySQL组件
 func NewMySQLComponent(name string, config *MySQLConfig, isDefault bool) *MySQLComponent {
-	mu.Lock()
+	mysqlMu.Lock()
 	if _, exist := mysqlInstancesOnce[name]; !exist {
 		mysqlInstancesOnce[name] = &sync.Once{}
 	}
 	once := mysqlInstancesOnce[name]
-	mu.Unlock()
+	mysqlMu.Unlock()
 
 	once.Do(func() {
-		if config.MaxIdleConns == 0 {
-			config.MaxIdleConns = 10
-		}
-		if config.MaxOpenConns == 0 {
-			config.MaxOpenConns = 100
-		}
-		if config.ConnMaxLifetime == 0 {
-			config.ConnMaxLifetime = time.Hour
-		}
-		if config.LogLevel == 0 {
-			config.LogLevel = logger.Info
-		}
+		// 兜底设置默认值
+		config.applyDefaults()
 
+		// 创建MySQL组件
 		m := &MySQLComponent{
 			config: config,
 		}
 
-		mu.Lock()
+		mysqlMu.Lock()
 		mysqlInstances[name] = m
 		if isDefault {
-			DefaultDB = m
+			defaultMySQLDB = m
 		}
-		mu.Unlock()
+		mysqlMu.Unlock()
 	})
 
-	mu.RLock()
+	mysqlMu.RLock()
 	instance := mysqlInstances[name]
-	mu.RUnlock()
+	mysqlMu.RUnlock()
 
 	return instance
 }
@@ -135,6 +143,7 @@ func (m *MySQLComponent) connectDB(dsn string) (*gorm.DB, error) {
 	gormConfig := &gorm.Config{
 		Logger: logger.Default.LogMode(m.config.LogLevel),
 	}
+
 	// 判断是否需要前缀
 	if m.config.Prefix != "" {
 		gormConfig.NamingStrategy = schema.NamingStrategy{
@@ -146,6 +155,7 @@ func (m *MySQLComponent) connectDB(dsn string) (*gorm.DB, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	sqlDB, err := db.DB()
 	if err != nil {
 		return nil, err
@@ -189,40 +199,46 @@ func (m *MySQLComponent) Master() *gorm.DB {
 	return m.master
 }
 
-// Replica 获取从库连接（轮询方式）
+// Slave 获取从库连接（轮询方式）
 func (m *MySQLComponent) Slave() *gorm.DB {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mu.RLock()
+	replicaLen := len(m.replicas)
+	master := m.master
+	m.mu.RUnlock()
 
-	if len(m.replicas) == 0 {
-		return m.master
+	if replicaLen == 0 { // 如果从库数量为 0
+		return master // 返回主库
 	}
 
-	m.current = (m.current + 1) % len(m.replicas)
-	return m.replicas[m.current]
+	n := atomic.AddUint32(&m.current, 1)
+	return m.replicas[n%uint32(replicaLen)]
 }
 
-// 默认实例的全局访问方法
-func GetDefaultDB() *gorm.DB {
-	if DefaultDB == nil {
+// ==================== 默认实例访问方法 ====================
+
+// DefaultMasterDB 获取默认实例的主库连接
+func DefaultMasterDB() *gorm.DB {
+	if defaultMySQLDB == nil {
 		panic("default MySQL instance not initialized")
 	}
-	return DefaultDB.Master()
+	return defaultMySQLDB.Master()
 }
 
-// 默认实例的从库访问方法
+// DefaultSlaveDB 获取默认实例的从库连接
 func DefaultSlaveDB() *gorm.DB {
-	if DefaultDB == nil {
+	if defaultMySQLDB == nil {
 		panic("default MySQL instance not initialized")
 	}
-	return DefaultDB.Slave()
+	return defaultMySQLDB.Slave()
 }
 
-// 保留原有的命名实例访问方法
-func DB(name string) *gorm.DB {
-	mu.RLock()
+// ==================== 命名实例访问方法 ====================
+
+// MasterDB 获取指定实例的主库连接
+func MasterDB(name string) *gorm.DB {
+	mysqlMu.RLock()
 	instance, ok := mysqlInstances[name]
-	mu.RUnlock()
+	mysqlMu.RUnlock()
 
 	if !ok {
 		panic(fmt.Sprintf("MySQL instance [%s] not found", name))
@@ -230,11 +246,11 @@ func DB(name string) *gorm.DB {
 	return instance.Master()
 }
 
-// ReplicaDB 获取从库连接
+// SlaveDB 获取指定实例的从库连接
 func SlaveDB(name string) *gorm.DB {
-	mu.RLock()
+	mysqlMu.RLock()
 	instance, ok := mysqlInstances[name]
-	mu.RUnlock()
+	mysqlMu.RUnlock()
 
 	if !ok {
 		panic(fmt.Sprintf("MySQL instance [%s] not found", name))
@@ -242,11 +258,11 @@ func SlaveDB(name string) *gorm.DB {
 	return instance.Slave()
 }
 
-// 获取指定实例
+// GetMySQLComponent 获取指定MySQL组件实例
 func GetMySQLComponent(name string) *MySQLComponent {
-	mu.RLock()
+	mysqlMu.RLock()
 	instance, ok := mysqlInstances[name]
-	mu.RUnlock()
+	mysqlMu.RUnlock()
 
 	if !ok {
 		panic(fmt.Sprintf("MySQL instance [%s] not found", name))

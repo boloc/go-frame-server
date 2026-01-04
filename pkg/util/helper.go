@@ -11,39 +11,58 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-sql-driver/mysql"
 )
 
-// 拼接mysqlDSN
+// BuildMysqlDSN 拼接 MySQL DSN，自动处理特殊字符
 func BuildMysqlDSN(dbMap map[string]any) string {
-	// URL 编码用户名和密码以处理特殊字符
-	username := url.QueryEscape(fmt.Sprint(dbMap["user"]))
-	password := url.QueryEscape(fmt.Sprint(dbMap["password"]))
-	loc := url.QueryEscape(fmt.Sprint(dbMap["loc"]))
+	// 获取时区（支持 Local 或具体时区如 Asia/Shanghai）
+	loc := "Local"
+	if dbMap["loc"] != nil {
+		loc = fmt.Sprint(dbMap["loc"])
+	}
+	location, err := time.LoadLocation(loc)
+	if err != nil {
+		location = time.Local
+	}
 
-	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=True&loc=%s",
-		username,
-		password,
-		dbMap["host"],
-		dbMap["port"],
-		dbMap["name"],
-		dbMap["charset"],
-		loc,
-	)
+	// 使用 mysql.Config 构建 DSN，自动处理特殊字符
+	cfg := mysql.Config{
+		User:                 fmt.Sprint(dbMap["user"]),
+		Passwd:               fmt.Sprint(dbMap["password"]),
+		Net:                  "tcp", // 指定 TCP 连接方式
+		Addr:                 fmt.Sprintf("%s:%v", dbMap["host"], dbMap["port"]),
+		DBName:               fmt.Sprint(dbMap["name"]),
+		ParseTime:            true,
+		Loc:                  location,
+		AllowNativePasswords: true,
+	}
+
+	// 排序规则（可选，如 utf8mb4_general_ci、utf8mb4_unicode_ci）
+	if dbMap["collation"] != nil {
+		cfg.Collation = fmt.Sprint(dbMap["collation"])
+	}
+
+	// 字符集（可选，不指定则用 collation 对应的默认字符集）
+	if dbMap["charset"] != nil {
+		cfg.Params = map[string]string{
+			"charset": fmt.Sprint(dbMap["charset"]),
+		}
+	}
+
+	return cfg.FormatDSN()
 }
 
-// 拼接clickhouseDSN
+// BuildClickhouseDSN 拼接 ClickHouse DSN，自动处理特殊字符
 func BuildClickhouseDSN(dbMap map[string]any) string {
-	// URL 编码用户名和密码以处理特殊字符
-	username := url.QueryEscape(fmt.Sprint(dbMap["user"]))
-	password := url.QueryEscape(fmt.Sprint(dbMap["password"]))
-
-	return fmt.Sprintf("http://%s:%s@%s:%s/%s",
-		username,
-		password,
-		dbMap["host"],
-		dbMap["port"],
-		dbMap["name"],
-	)
+	// 使用 url.URL 结构体构建，自动处理特殊字符
+	u := &url.URL{
+		Scheme: "http",
+		User:   url.UserPassword(fmt.Sprint(dbMap["user"]), fmt.Sprint(dbMap["password"])),
+		Host:   fmt.Sprintf("%s:%v", dbMap["host"], dbMap["port"]),
+		Path:   fmt.Sprint(dbMap["name"]),
+	}
+	return u.String()
 }
 
 // 获取客户端IP
@@ -55,14 +74,15 @@ func GetClientIP(c *gin.Context) string {
 func PrintReqParams(c *gin.Context) {
 	// 判断方法类型
 	method := c.Request.Method
-	if method == "GET" {
+	switch method {
+	case "GET":
 		// 打印GET请求参数
 		query := c.Request.URL.Query()
 		fmt.Printf("传入的GET请求参数: %v\n", query)
 		//转成json,带格式的
 		queryJson, _ := json.MarshalIndent(query, "", "  ")
 		fmt.Printf("传入的GET请求参数转json: %v\n", string(queryJson))
-	} else if method == "POST" {
+	case "POST":
 		// 打印POST请求参数
 		body, _ := c.GetRawData()
 		// 转成json,带格式的
