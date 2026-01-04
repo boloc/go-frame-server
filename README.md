@@ -46,7 +46,7 @@ func main() {
 
 ### 3. 完整示例（推荐结构）
 
-```
+```js
 cmd/client/
 ├── main.go
 ├── bootstrap/
