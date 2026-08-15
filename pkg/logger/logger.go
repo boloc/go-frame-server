@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,12 +17,35 @@ import (
 // LoggerOption 定义日志选项函数类型
 type LoggerOption func(*LoggerComponent)
 
-var log *zap.Logger
+// activeLogger 在 Start 成功后指向真正的 logger；未 Start 时为 nil。
+var activeLogger atomic.Pointer[zap.Logger]
+
+// fallbackLogger 在尚未 Start 时写 stderr。
+var fallbackLogger = newFallbackLogger()
+
+func newFallbackLogger() *zap.Logger {
+	cfg := zap.NewDevelopmentConfig()
+	cfg.OutputPaths = []string{"stderr"}
+	l, err := cfg.Build(zap.AddCallerSkip(1))
+	if err != nil {
+		return zap.NewNop()
+	}
+	return l
+}
+
+// current 返回当前可用的 logger；未 Start 时使用 fallbackLogger。
+func current() *zap.Logger {
+	if l := activeLogger.Load(); l != nil {
+		return l
+	}
+	return fallbackLogger
+}
 
 // LoggerComponent 日志组件
 type LoggerComponent struct {
-	config  *LoggerConfig
-	started atomic.Bool // 使用原子操作确保日志组件的状态一致性
+	config    *LoggerConfig
+	started   atomic.Bool
+	zapLogger *zap.Logger
 }
 
 const (
@@ -148,8 +172,8 @@ func NewLoggerComponent(opts ...LoggerOption) *LoggerComponent {
 	return l
 }
 
-// Start 启动日志组件
-func (l *LoggerComponent) Start() error {
+// Start 启动日志组件。建议最先注册，以便其它组件启停时日志已就绪。
+func (l *LoggerComponent) Start(ctx context.Context) error {
 	// 确保不会重复启动
 	if l.started.Load() {
 		return nil
@@ -242,7 +266,7 @@ func (l *LoggerComponent) Start() error {
 	core := zapcore.NewTee(cores...)
 
 	// 创建记录器，开启调用信息
-	log = zap.New(
+	realLogger := zap.New(
 		core,
 		zap.AddCaller(),
 		zap.AddCallerSkip(1),
@@ -250,8 +274,12 @@ func (l *LoggerComponent) Start() error {
 		zap.WithFatalHook(zapcore.WriteThenFatal), // 确保 Fatal 级别的日志在程序退出前被写入
 	)
 
-	// 替换全局记录器
-	zap.ReplaceGlobals(log)
+	// 替换全局记录器（给直接用 zap.L()/zap.S() 的代码用）
+	zap.ReplaceGlobals(realLogger)
+
+	// 发布为本包 Debug/Info/Warn/Error/Fatal 以及 GetLogger() 使用的真正 logger。
+	activeLogger.Store(realLogger)
+	l.zapLogger = realLogger
 
 	// 设置启动标志
 	l.started.Store(true)
@@ -259,32 +287,48 @@ func (l *LoggerComponent) Start() error {
 	return nil
 }
 
+// Stop 同步未落盘日志，并回退到 fallbackLogger。Sync 失败会被忽略。
+func (l *LoggerComponent) Stop(ctx context.Context) error {
+	if !l.started.Load() {
+		return nil
+	}
+
+	if l.zapLogger != nil {
+		_ = l.zapLogger.Sync()
+	}
+
+	activeLogger.Store(nil)
+	l.zapLogger = nil
+	l.started.Store(false)
+	return nil
+}
+
+// GetLogger 返回当前 logger；未 Start 或已 Stop 时返回 fallbackLogger，不会为 nil。
 func (l *LoggerComponent) GetLogger() *zap.Logger {
-	return log
+	return current()
 }
 
 // 时间编码器
 func timeEncoder(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
-	enc.AppendString(t.Format("2006-01-02 15:04:05"))
+	enc.AppendString(t.Format(time.DateTime))
 }
 
-// 以下是一些便捷方法
 func Debug(msg string, fields ...zap.Field) {
-	log.Debug(msg, fields...)
+	current().Debug(msg, fields...)
 }
 
 func Info(msg string, fields ...zap.Field) {
-	log.Info(msg, fields...)
+	current().Info(msg, fields...)
 }
 
 func Warn(msg string, fields ...zap.Field) {
-	log.Warn(msg, fields...)
+	current().Warn(msg, fields...)
 }
 
 func Error(msg string, fields ...zap.Field) {
-	log.Error(msg, fields...)
+	current().Error(msg, fields...)
 }
 
 func Fatal(msg string, fields ...zap.Field) {
-	log.Fatal(msg, fields...)
+	current().Fatal(msg, fields...)
 }

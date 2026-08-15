@@ -26,6 +26,11 @@ type ClickHouseConfig struct {
 	Debug           bool                    // 调试
 	Protocol        string                  // 协议类型：native 或 http
 	DSN             string                  // 直接设置DSN连接字符串
+
+	// ConnectRetryAttempts 启动时连接失败的重试次数（含第一次尝试），默认 3。
+	ConnectRetryAttempts int
+	// ConnectRetryInterval 每次重试之间的等待时间，默认 2s。
+	ConnectRetryInterval time.Duration
 }
 
 // ClickHouseComponent ClickHouse组件
@@ -36,10 +41,9 @@ type ClickHouseComponent struct {
 }
 
 var (
-	clickhouseInstances     = make(map[string]*ClickHouseComponent)
-	clickhouseInstancesOnce = make(map[string]*sync.Once)
-	DefaultClickHouse       *ClickHouseComponent // 添加默认实例
-	clickhouseMu            sync.RWMutex
+	clickhouseInstances = make(map[string]*ClickHouseComponent)
+	DefaultClickHouse   *ClickHouseComponent // 添加默认实例
+	clickhouseMu        sync.RWMutex
 )
 
 // ClickHouseOption 定义ClickHouse选项函数类型
@@ -139,55 +143,60 @@ func WithClickHouseDSN(dsn string) ClickHouseOption {
 	}
 }
 
-// NewClickHouseComponent 创建ClickHouse组件
+// WithClickHouseConnectRetryAttempts 设置 Start() 阶段初次连接的重试次数（含第一次尝试），默认 3。
+func WithClickHouseConnectRetryAttempts(attempts int) ClickHouseOption {
+	return func(c *ClickHouseConfig) {
+		c.ConnectRetryAttempts = attempts
+	}
+}
+
+// WithClickHouseConnectRetryInterval 设置 Start() 阶段初次连接每次重试之间的等待时间，默认 2s。
+func WithClickHouseConnectRetryInterval(interval time.Duration) ClickHouseOption {
+	return func(c *ClickHouseConfig) {
+		c.ConnectRetryInterval = interval
+	}
+}
+
+// NewClickHouseComponent 创建 ClickHouse 组件。同一 name 只能注册一次，重复注册会 panic。
+// Address 可传多个地址，负载均衡与故障切换由 clickhouse-go 处理。
 func NewClickHouseComponent(name string, isDefault bool, opts ...ClickHouseOption) *ClickHouseComponent {
 	clickhouseMu.Lock()
-	if _, exist := clickhouseInstancesOnce[name]; !exist {
-		clickhouseInstancesOnce[name] = &sync.Once{}
+	defer clickhouseMu.Unlock()
+
+	if _, exists := clickhouseInstances[name]; exists {
+		panic(fmt.Sprintf("ClickHouse instance [%s] already registered: NewClickHouseComponent 不能对同一个 name 调用两次", name))
 	}
-	once := clickhouseInstancesOnce[name]
-	clickhouseMu.Unlock()
 
-	once.Do(func() {
-		config := &ClickHouseConfig{
-			Address:         []string{"localhost:9000"},
-			Database:        "default",
-			Username:        "default",
-			Password:        "",
-			MaxOpenConns:    10,
-			MaxIdleConns:    5,
-			ConnMaxLifetime: time.Hour,
-			DialTimeout:     10 * time.Second,
-			ReadTimeout:     20 * time.Second,
-			Compression: &clickhouse.Compression{
-				Method: clickhouse.CompressionLZ4,
-				Level:  0, // 使用默认压缩级别
-			},
-			Debug:    false,
-			Protocol: "native", // 默认使用native协议
-		}
+	config := &ClickHouseConfig{
+		Address:         []string{"localhost:9000"},
+		Database:        "default",
+		Username:        "default",
+		Password:        "",
+		MaxOpenConns:    10,
+		MaxIdleConns:    5,
+		ConnMaxLifetime: time.Hour,
+		DialTimeout:     10 * time.Second,
+		ReadTimeout:     20 * time.Second,
+		Compression: &clickhouse.Compression{
+			Method: clickhouse.CompressionLZ4,
+			Level:  0, // 使用默认压缩级别
+		},
+		Debug:                false,
+		Protocol:             "native", // 默认使用native协议
+		ConnectRetryAttempts: 3,
+		ConnectRetryInterval: 2 * time.Second,
+	}
 
-		for _, opt := range opts {
-			opt(config)
-		}
+	for _, opt := range opts {
+		opt(config)
+	}
 
-		c := &ClickHouseComponent{
-			config: config,
-		}
-
-		clickhouseMu.Lock()
-		clickhouseInstances[name] = c
-		if isDefault {
-			DefaultClickHouse = c
-		}
-		clickhouseMu.Unlock()
-	})
-
-	clickhouseMu.RLock()
-	instance := clickhouseInstances[name]
-	clickhouseMu.RUnlock()
-
-	return instance
+	c := &ClickHouseComponent{config: config}
+	clickhouseInstances[name] = c
+	if isDefault {
+		DefaultClickHouse = c
+	}
+	return c
 }
 
 // Start 启动ClickHouse组件
@@ -195,56 +204,39 @@ func (c *ClickHouseComponent) Start(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// 如果已经连接，则跳过
+	// Start 幂等：已连接则跳过。
 	if c.conn != nil {
 		return nil
 	}
 
-	var options *clickhouse.Options
-	var err error
-
-	// 如果设置了DSN，优先使用DSN
-	if c.config.DSN != "" {
-		// 尝试解析DSN
-		fmt.Printf("使用DSN连接: %s\n", c.config.DSN)
-		options, err = clickhouse.ParseDSN(c.config.DSN)
-		if err != nil {
-			return fmt.Errorf("failed to parse DSN: %v", err)
-		}
-	} else {
-		// 确定协议类型
-		var protocol clickhouse.Protocol
-		if c.config.Protocol == "http" {
-			protocol = clickhouse.HTTP
+	if c.config.Debug {
+		if c.config.DSN != "" {
+			fmt.Printf("[clickhouse] 使用DSN连接: %s\n", maskClickHouseDSN(c.config.DSN))
 		} else {
-			protocol = clickhouse.Native
-		}
-
-		// 打印当前配置信息，便于调试
-		fmt.Printf("ClickHouse连接信息:\n")
-		fmt.Printf("地址: %v\n", c.config.Address)
-		fmt.Printf("数据库: %s\n", c.config.Database)
-		fmt.Printf("用户名: %s\n", c.config.Username)
-		fmt.Printf("协议: %s\n", c.config.Protocol)
-		fmt.Printf("超时: %s\n", c.config.DialTimeout)
-
-		// 构建连接选项
-		options = &clickhouse.Options{
-			Protocol: protocol,
-			Addr:     c.config.Address, // 地址
-			Auth: clickhouse.Auth{
-				Database: c.config.Database, // 数据库
-				Username: c.config.Username, // 用户名
-				Password: c.config.Password, // 密码
-			},
-			DialTimeout:     c.config.DialTimeout,     // 连接超时时间
-			MaxOpenConns:    c.config.MaxOpenConns,    // 最大连接数
-			MaxIdleConns:    c.config.MaxIdleConns,    // 最大空闲连接数
-			ConnMaxLifetime: c.config.ConnMaxLifetime, // 连接最大生命周期
-			Compression:     c.config.Compression,     // 压缩方式
-			ReadTimeout:     c.config.ReadTimeout,     // 读取超时时间
+			fmt.Printf("[clickhouse] 连接信息: address=%v database=%s username=%s protocol=%s dial_timeout=%s\n",
+				c.config.Address, c.config.Database, c.config.Username, c.config.Protocol, c.config.DialTimeout)
 		}
 	}
+
+	// DSN 优先，否则按结构化字段构建 Options（与 GORM 组件共用 buildClickHouseOptions）。
+	options, err := buildClickHouseOptions(clickhouseConnParams{
+		DSN:         c.config.DSN,
+		Address:     c.config.Address,
+		Database:    c.config.Database,
+		Username:    c.config.Username,
+		Password:    c.config.Password,
+		Protocol:    c.config.Protocol,
+		DialTimeout: c.config.DialTimeout,
+		ReadTimeout: c.config.ReadTimeout,
+		Compression: c.config.Compression,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to parse DSN: %w", err)
+	}
+	// 连接池参数在此覆盖，DSN 与结构化字段两条路径都会生效。
+	options.MaxOpenConns = c.config.MaxOpenConns
+	options.MaxIdleConns = c.config.MaxIdleConns
+	options.ConnMaxLifetime = c.config.ConnMaxLifetime
 
 	// 设置调试模式
 	if c.config.Debug {
@@ -258,19 +250,39 @@ func (c *ClickHouseComponent) Start(ctx context.Context) error {
 		}
 	}
 
-	// 尝试打开连接
-	conn, err := clickhouse.Open(options)
-	if err != nil {
-		return fmt.Errorf("failed to connect to ClickHouse: %v", err)
-	}
-
-	// 测试连接
-	if err := conn.Ping(ctx); err != nil {
-		return fmt.Errorf("failed to ping ClickHouse: %v", err)
+	// 打开连接并 Ping，失败按 ConnectRetryAttempts/ConnectRetryInterval 重试。
+	var conn driver.Conn
+	retryErr := retryConnect(ctx, c.config.ConnectRetryAttempts, c.config.ConnectRetryInterval, func() error {
+		newConn, openErr := clickhouse.Open(options)
+		if openErr != nil {
+			return openErr
+		}
+		if pingErr := newConn.Ping(ctx); pingErr != nil {
+			_ = newConn.Close()
+			return pingErr
+		}
+		conn = newConn
+		return nil
+	})
+	if retryErr != nil {
+		return fmt.Errorf("failed to connect to ClickHouse: %w", retryErr)
 	}
 
 	c.conn = conn
 	return nil
+}
+
+// maskClickHouseDSN 打日志前脱敏 DSN 里的密码（DSN 形如 http://user:pass@host:port/db）。
+func maskClickHouseDSN(dsn string) string {
+	at := strings.Index(dsn, "@")
+	if at <= 0 {
+		return dsn
+	}
+	colon := strings.LastIndex(dsn[:at], ":")
+	if colon <= 0 {
+		return dsn
+	}
+	return dsn[:colon+1] + "***" + dsn[at:]
 }
 
 // Stop 停止ClickHouse组件
@@ -278,10 +290,12 @@ func (c *ClickHouseComponent) Stop(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.conn != nil {
-		return c.conn.Close()
+	if c.conn == nil {
+		return nil
 	}
-	return nil
+	err := c.conn.Close()
+	c.conn = nil // 清空引用，便于 Restart 后重新连接
+	return err
 }
 
 // GetConn 获取ClickHouse连接
@@ -291,7 +305,7 @@ func (c *ClickHouseComponent) GetConn() driver.Conn {
 	return c.conn
 }
 
-// 获取默认ClickHouse连接
+// GetDefaultClickHouse 获取默认 ClickHouse 连接；未初始化时 panic。
 func GetDefaultClickHouse() driver.Conn {
 	if DefaultClickHouse == nil {
 		panic("default ClickHouse instance not initialized")
@@ -299,7 +313,7 @@ func GetDefaultClickHouse() driver.Conn {
 	return DefaultClickHouse.GetConn()
 }
 
-// 获取指定名称的ClickHouse连接
+// GetClickHouse 获取指定名称的 ClickHouse 连接；不存在时 panic。
 func GetClickHouse(name string) driver.Conn {
 	clickhouseMu.RLock()
 	instance, ok := clickhouseInstances[name]
@@ -311,7 +325,7 @@ func GetClickHouse(name string) driver.Conn {
 	return instance.GetConn()
 }
 
-// 获取指定名称的ClickHouse组件
+// GetClickHouseComponent 获取指定名称的 ClickHouse 组件；不存在时 panic。
 func GetClickHouseComponent(name string) *ClickHouseComponent {
 	clickhouseMu.RLock()
 	instance, ok := clickhouseInstances[name]

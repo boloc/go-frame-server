@@ -6,7 +6,7 @@ import (
 	"github.com/boloc/go-frame-server/pkg/logger"
 )
 
-// SetupLogger 初始化日志组件
+// SetupLogger 初始化日志组件，应在 bootstrap.Setup 里最先注册。
 func SetupLogger(f *frame.Frame, conf *config.ConfigComponent) {
 	log := logger.NewLoggerComponent(
 		logger.WithLoggerLevel(conf.GetString("logs.log_level")),     // 日志级别
@@ -18,6 +18,5 @@ func SetupLogger(f *frame.Frame, conf *config.ConfigComponent) {
 		logger.WithLoggerMaxAge(conf.GetInt("logs.max_age")),         // 日志文件最大保留天数
 		logger.WithLoggerCompress(conf.GetBool("logs.compress")),     // 是否压缩
 	)
-	log.Start()
-	f.SetLogger(log.GetLogger())
+	f.RegisterComponent(log)
 }

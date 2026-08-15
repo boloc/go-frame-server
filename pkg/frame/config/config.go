@@ -2,7 +2,8 @@ package config
 
 import (
 	"fmt"
-	"log"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -131,71 +132,69 @@ func (c *ConfigComponent) GetStringSlice(key string) []string {
 	return c.viper.GetStringSlice(key)
 }
 
-//	将字符串值解析为 time.Duration
-//
-// 用于已从配置解析出的字符串值，如 "1h", "30m", "5s"
-//
-// @param value string 时间字符串
-// @return time.Duration 时间
-func ParseDuration(value string) time.Duration {
+// ParseDuration 解析时间字符串。空字符串返回 (0, nil)；非空但非法返回 error。
+func ParseDuration(value string) (time.Duration, error) {
 	if value == "" {
-		return 0
+		return 0, nil
 	}
 	d, err := time.ParseDuration(value)
 	if err != nil {
-		return 0
+		return 0, fmt.Errorf("解析时间配置 %q 失败: %w", value, err)
 	}
-	return d
+	return d, nil
 }
 
-//	加载配置文件（单例），如果出错则panic
-//
-// @param configFile string 配置文件完整路径，如: ./config/frame-server.yml
-// @return *ConfigComponent 配置组件
+// Resolve 按 -c/--config、CONFIG_FILE、defaultPath 的优先级解析配置路径，不加载文件。
+func Resolve(defaultPath string) string {
+	if v := scanArgsForFlag(os.Args[1:], "c", "config"); v != "" {
+		return v
+	}
+	if v := os.Getenv("CONFIG_FILE"); v != "" {
+		return v
+	}
+	return defaultPath
+}
+
+// scanArgsForFlag 在 args 里查找 -name / --name（以及 name=value 形式），返回其值；找不到返回空串。
+func scanArgsForFlag(args []string, names ...string) string {
+	for i := 0; i < len(args); i++ {
+		trimmed := strings.TrimLeft(args[i], "-")
+		if trimmed == args[i] {
+			continue
+		}
+		for _, name := range names {
+			switch {
+			case trimmed == name:
+				if i+1 < len(args) {
+					return args[i+1]
+				}
+			case strings.HasPrefix(trimmed, name+"="):
+				return strings.TrimPrefix(trimmed, name+"=")
+			}
+		}
+	}
+	return ""
+}
+
+// LoadFile 加载配置文件，失败返回 error，不设置全局单例。
+func LoadFile(configFile string) (*ConfigComponent, error) {
+	conf := NewConfig(configFile)
+	if err := conf.Load(); err != nil {
+		return nil, err
+	}
+	return conf, nil
+}
+
+// MustLoadFile 加载配置并设为全局单例，失败则 panic。
 func MustLoadFile(configFile string) *ConfigComponent {
 	once.Do(func() {
-		conf := NewConfig(configFile)
-		if err := conf.Load(); err != nil {
+		conf, err := LoadFile(configFile)
+		if err != nil {
 			panic(err)
 		}
 		globalConfig = conf
 	})
 	return globalConfig
-}
-
-// @title 获取配置值, 独立方法
-// @description 获取配置值，如果配置不存在则返回默认值
-// @param key string 配置名
-// @param defaultValue interface{} any
-// @return interface{} any
-func GetConfigValue[T any](key string, defaultValue T) T {
-	viper := GetConfig().GetViper() // 获取viper实例
-	value := viper.Get(key)
-	if value == nil {
-		return defaultValue
-	}
-
-	switch any(defaultValue).(type) {
-	case string:
-		return any(viper.GetString(key)).(T)
-	case bool:
-		return any(viper.GetBool(key)).(T)
-	case int:
-		return any(viper.GetInt(key)).(T)
-	case float64:
-		return any(viper.GetFloat64(key)).(T)
-	case []string:
-		return any(viper.GetStringSlice(key)).(T)
-	case []any: // 处理接口列表
-		return any(viper.Get(key)).(T) // 直接返回获取的值
-	case map[string]any:
-		return any(viper.GetStringMap(key)).(T)
-	case time.Duration:
-		return any(viper.GetDuration(key)).(T)
-	default:
-		log.Printf("Type not supported: %T, returning default value\n", defaultValue)
-		return defaultValue
-	}
 }
 
 // IsProduction 判断是否是生产环境

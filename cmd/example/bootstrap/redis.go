@@ -6,8 +6,9 @@ import (
 	"github.com/boloc/go-frame-server/pkg/frame/config"
 )
 
-// SetupRedis 初始化Redis单机组件
-func SetupRedis(f *frame.Frame, conf *config.ConfigComponent) {
+// SetupRedis 初始化Redis单机组件，返回创建的组件实例方便调用方（如 SetupMonitor）
+// 挂上连接池指标采集器。
+func SetupRedis(f *frame.Frame, conf *config.ConfigComponent) *components.RedisComponent {
 	redisComponent := components.NewRedisComponent(
 		components.WithRedisAddr(conf.GetString("redis.single.addr")),
 		components.WithRedisPassword(conf.GetString("redis.single.password")),
@@ -20,6 +21,7 @@ func SetupRedis(f *frame.Frame, conf *config.ConfigComponent) {
 		components.WithRedisMaxRetries(conf.GetInt("redis.single.max_retries")),
 	)
 	f.RegisterComponent(redisComponent)
+	return redisComponent
 }
 
 // SetupRedisCluster 初始化Redis集群组件
@@ -38,4 +40,22 @@ func SetupRedisCluster(f *frame.Frame, conf *config.ConfigComponent) {
 		components.WithClusterMaxRetryBackoff(conf.GetStringTimeDuration("redis.cluster.max_retry_backoff")),
 	)
 	f.RegisterComponent(redisClusterComponent)
+}
+
+// SetupRedisSentinel 初始化 Redis 哨兵组件；与单机/集群三选一，按需替换 Setup 里的调用。
+func SetupRedisSentinel(f *frame.Frame, conf *config.ConfigComponent) {
+	redisSentinelComponent := components.NewRedisSentinelComponent(
+		components.WithSentinelMasterName(conf.GetString("redis.sentinel.master_name")),
+		components.WithSentinelAddrs(conf.GetStringSlice("redis.sentinel.addrs")),
+		components.WithSentinelPassword(conf.GetString("redis.sentinel.password")),
+		components.WithSentinelDataPassword(conf.GetString("redis.sentinel.data_password")),
+		components.WithSentinelDB(conf.GetInt("redis.sentinel.db")),
+		components.WithSentinelPoolSize(conf.GetInt("redis.sentinel.pool_size")),
+		components.WithSentinelMinIdleConns(conf.GetInt("redis.sentinel.min_idle_conns")),
+		components.WithSentinelDialTimeout(conf.GetStringTimeDuration("redis.sentinel.dial_timeout")),
+		components.WithSentinelReadTimeout(conf.GetStringTimeDuration("redis.sentinel.read_timeout")),
+		components.WithSentinelWriteTimeout(conf.GetStringTimeDuration("redis.sentinel.write_timeout")),
+		components.WithSentinelMaxRetries(conf.GetInt("redis.sentinel.max_retries")),
+	)
+	f.RegisterComponent(redisSentinelComponent)
 }

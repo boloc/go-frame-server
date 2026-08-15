@@ -1,12 +1,11 @@
+// Package monitor 提供进程级资源指标采集，通过 MetricsComponent 接入 Frame 生命周期。
 package monitor
 
 import (
-	"fmt"
+	"context"
 	"runtime"
 	"strconv"
 	"time"
-
-	"github.com/boloc/go-frame-server/pkg/frame/config"
 
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus"
@@ -51,36 +50,80 @@ var (
 	)
 )
 
-func init() {
-	// 注册所有指标
-	// 注意：使用promauto已自动注册，不需要再显式注册
-	fmt.Println("Prometheus metrics initializing...")
-	// 开始定期收集资源使用情况
-	go collectResourceMetrics()
+// MetricsConfig MetricsComponent 的配置。
+type MetricsConfig struct {
+	CollectInterval time.Duration
 }
 
-// collectResourceMetrics 定期收集资源使用情况
-func collectResourceMetrics() {
-	// 立即更新一次数据
+// MetricsOption 定义 MetricsComponent 选项函数类型。
+type MetricsOption func(*MetricsConfig)
+
+// WithCollectInterval 设置采集间隔。
+func WithCollectInterval(d time.Duration) MetricsOption {
+	return func(c *MetricsConfig) { c.CollectInterval = d }
+}
+
+// MetricsComponent 定期采集进程级资源指标，实现 frame.Component。
+type MetricsComponent struct {
+	config *MetricsConfig
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
+// NewMetricsComponent 创建资源指标采集组件。
+func NewMetricsComponent(opts ...MetricsOption) *MetricsComponent {
+	cfg := &MetricsConfig{CollectInterval: 15 * time.Second}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+	return &MetricsComponent{config: cfg}
+}
+
+func (m *MetricsComponent) Start(ctx context.Context) error {
 	updateMetrics()
 
-	// 开始定期更新
+	runCtx, cancel := context.WithCancel(context.Background())
+	m.cancel = cancel
+	m.done = make(chan struct{})
+	go m.loop(runCtx)
+	return nil
+}
+
+func (m *MetricsComponent) loop(ctx context.Context) {
+	defer close(m.done)
+
+	ticker := time.NewTicker(m.config.CollectInterval)
+	defer ticker.Stop()
+
 	for {
-		fmt.Println("查看是否执行")
-		time.Sleep(5 * time.Second)
-		updateMetrics()
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			updateMetrics()
+		}
 	}
 }
 
-// 将更新逻辑抽取出来
+func (m *MetricsComponent) Stop(ctx context.Context) error {
+	if m.cancel == nil {
+		return nil
+	}
+	m.cancel()
+
+	select {
+	case <-m.done:
+	case <-ctx.Done():
+	}
+	return nil
+}
+
+// updateMetrics 采集一次内存/goroutine 指标。
 func updateMetrics() {
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
 
-	// 更新内存使用量（字节）
 	memoryUsage.Set(float64(memStats.Alloc))
-
-	// 更新Goroutine数量
 	goroutineCount.Set(float64(runtime.NumGoroutine()))
 }
 
@@ -89,14 +132,14 @@ func ObserveLatency(endpoint string, duration time.Duration) {
 	resourceLatency.WithLabelValues(endpoint).Observe(duration.Seconds())
 }
 
-// ObserveHTTPError 记录错误
+// ObserveError 记录错误
 func ObserveError(endpoint string, errorCode int) {
 	sourceError.WithLabelValues(endpoint, strconv.Itoa(errorCode)).Inc()
 }
 
-// 添加基本认证
-func PrometheusAuth() gin.HandlerFunc {
+// PrometheusAuth 给 /metrics 加 HTTP Basic Auth，password 由调用方传入。
+func PrometheusAuth(password string) gin.HandlerFunc {
 	return gin.BasicAuth(gin.Accounts{
-		"prometheus": config.GetConfig().GetString("prometheus.password"),
+		"prometheus": password,
 	})
 }

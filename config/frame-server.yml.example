@@ -3,6 +3,7 @@ server:
   env: local # local/test/production
   name: go-github.com/boloc/go-frame-server
   port: 10005
+  timezone: UTC # 进程默认时区（IANA 时区名，如 Asia/Shanghai），未配置时默认 UTC
 
 # logs Configuration
 logs:
@@ -32,7 +33,7 @@ database:
       password: root
       charset: utf8mb4
       parse_time: true # true: 允许 MySQL 驱动将 MySQL 的 DATE 和 DATETIME 类型自动转换为 Go 的 time.Time 类型 false:时间类型会以字符串形式返回
-      loc: Local # 连接的时区 local:系统本地时区 （可以指定具体时区，如 Asia/Shanghai）
+      loc: UTC # 连接的时区，跟 server.timezone 无关，留空默认 UTC（可以指定具体时区，如 Asia/Shanghai，覆盖这个实例自己存量数据的时区）
     # slaves:
     #   - host: 192.168.1.30 # 从库1
     #     port: 3306
@@ -41,14 +42,14 @@ database:
     #     password: root
     #     charset: utf8mb4
     #     parse_time: true # true: 允许 MySQL 驱动将 MySQL 的 DATE 和 DATETIME 类型自动转换为 Go 的 time.Time 类型 false:时间类型会以字符串形式返回
-    #     loc: Local # 连接的时区 local:系统本地时区 （可以指定具体时区，如 Asia/Shanghai）
+    #     loc: UTC # 连接的时区，留空默认 UTC（可以指定具体时区，如 Asia/Shanghai）
     #   - host: 192.168.1.30 # 从库2
     #     port: 3306
     #     name: shortlink
     #     user: root
     #     password: root
     #     charset: utf8mb4
-    #     loc: Local # 连接的时区 local:系统本地时区 （可以指定具体时区，如 Asia/Shanghai）
+    #     loc: UTC # 连接的时区，留空默认 UTC（可以指定具体时区，如 Asia/Shanghai）
 
 # Redis Configuration
 redis:
@@ -84,3 +85,13 @@ redis:
 # prometheus相关
 prometheus:
   password: ""
+
+# 对象存储配置，见 pkg/frame/storage/README.md（这个包本身没有独立的 Setup 生命周期，
+# 按需在业务的 bootstrap 里读这段配置创建 storage.S3Client）
+storage:
+  r2:
+    account_id: ""
+    access_key_id: ""
+    access_key_secret: ""
+    bucket_name: ""
+    public_base_url: "" # 建议配置自定义域名，否则退回 R2 的 API 端点（默认不公开可访问）

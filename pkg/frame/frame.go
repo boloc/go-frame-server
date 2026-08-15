@@ -1,8 +1,9 @@
+// Package frame 提供组件生命周期：装配、启停钩子、信号优雅关闭与热重启。
+// 配置由 main 加载后交给 bootstrap，Frame 本身不持有业务配置。
 package frame
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"os"
 	"os/signal"
@@ -10,95 +11,91 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/boloc/go-frame-server/pkg/frame/config"
+	"github.com/boloc/go-frame-server/pkg/alert"
+	"github.com/boloc/go-frame-server/pkg/logger"
 	"go.uber.org/zap"
 )
 
-// Component 定义组件接口
+// Component 跟随进程生命周期启动/停止的资源。
 type Component interface {
-	// Start 启动组件
+	// Start 启动组件。返回 error 会导致 Frame.Start 中止并回滚已启动的组件。
 	Start(ctx context.Context) error
-	// Stop 停止组件
+	// Stop 停止组件。即使返回 error，Frame 也会继续停止其它组件（尽力关闭，不因单个组件失败而卡住整体退出）。
 	Stop(ctx context.Context) error
 }
 
-// Hook 定义钩子函数类型
+// Hook 定义钩子函数类型，用于 AfterStart / BeforeStop。
 type Hook func(ctx context.Context) error
 
-// FrameConfig 框架配置
+// FrameConfig 框架自身的行为配置（不含任何业务配置）。
 type FrameConfig struct {
+	// ShutdownTimeout 优雅关闭超时。超时后仍会带着已取消的 ctx 继续 Stop 剩余组件。
 	ShutdownTimeout time.Duration
-	ConfigFile      string // 配置文件路径
+	// EnableRestartSignal 是否响应 SIGHUP 热重启（重启组件但不退出进程），默认开启。
+	EnableRestartSignal bool
 }
 
-// Option 定义框架选项函数类型
+// Option 定义框架选项函数类型。
 type Option func(*Frame)
 
-// WithShutdownTimeout 设置关闭超时时间
+// WithShutdownTimeout 设置优雅关闭超时时间。
 func WithShutdownTimeout(timeout time.Duration) Option {
 	return func(f *Frame) {
 		f.config.ShutdownTimeout = timeout
 	}
 }
 
-// WithConfigFile 设置配置文件路径（可被 -c 命令行参数覆盖）
-func WithConfigFile(configFile string) Option {
+// WithRestartSignal 控制是否响应 SIGHUP 触发热重启（见 Frame.Restart）。
+func WithRestartSignal(enabled bool) Option {
 	return func(f *Frame) {
-		f.config.ConfigFile = configFile
+		f.config.EnableRestartSignal = enabled
 	}
 }
 
-// Frame 框架核心结构
-type Frame struct {
-	components []Component
-	logger     *zap.Logger
-	config     *FrameConfig
-	appConfig  *config.ConfigComponent // 应用配置
-	mu         sync.RWMutex
+// runState 用来在并发场景下判断 Frame 当前处于什么阶段，避免重复 Start/对未 Start 的实例调用 Stop。
+type runState int32
 
-	// 钩子函数
+const (
+	stateIdle runState = iota
+	stateRunning
+	stateStopped
+)
+
+// Frame 框架核心结构。不含任何 package-level 全局状态，可以创建多个独立实例。
+type Frame struct {
+	mu         sync.RWMutex
+	components []Component
+	config     *FrameConfig
+	state      runState
+
 	afterStartHooks []Hook
 	beforeStopHooks []Hook
+
+	// singletons 记录 RegisterSingleton 已经用过的 key，见该方法的文档。
+	singletons map[string]bool
 }
 
-// New 创建新的框架实例
+// New 创建新的框架实例。
 func New(opts ...Option) *Frame {
 	f := &Frame{
-		components: make([]Component, 0), // 组件列表
+		components: make([]Component, 0),
 		config: &FrameConfig{
-			ShutdownTimeout: 30 * time.Second, // 默认30秒超时
+			ShutdownTimeout:     30 * time.Second,
+			EnableRestartSignal: true,
 		},
 		afterStartHooks: make([]Hook, 0),
 		beforeStopHooks: make([]Hook, 0),
+		singletons:      make(map[string]bool),
 	}
 
-	// 应用所有选项
 	for _, opt := range opts {
 		opt(f)
-	}
-
-	// 加载配置文件
-	// 优先级：环境变量 CONFIG_FILE > -c 命令行参数 > 默认值
-	envConfig := os.Getenv("CONFIG_FILE")
-	if envConfig != "" {
-		// 环境变量优先级最高
-		f.appConfig = config.MustLoadFile(envConfig)
-	} else if f.config.ConfigFile != "" { // 配置文件路径
-		// 解析 -c 命令行参数
-		configFile := flag.String("c", f.config.ConfigFile, "配置文件路径")
-		flag.Parse()
-		f.appConfig = config.MustLoadFile(*configFile)
 	}
 
 	return f
 }
 
-// Config 获取应用配置
-func (f *Frame) Config() *config.ConfigComponent {
-	return f.appConfig
-}
-
-// AfterStart 注册启动后的钩子函数
+// AfterStart 注册启动后的钩子函数，按注册顺序依次执行；任意一个返回 error 会中止 Run。
 func (f *Frame) AfterStart(hook Hook) *Frame {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -106,7 +103,7 @@ func (f *Frame) AfterStart(hook Hook) *Frame {
 	return f
 }
 
-// BeforeStop 注册停止前的钩子函数
+// BeforeStop 注册停止前的钩子函数，按注册顺序依次执行；某个钩子失败只记录日志，不阻止后续钩子和 Stop 执行。
 func (f *Frame) BeforeStop(hook Hook) *Frame {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -114,126 +111,189 @@ func (f *Frame) BeforeStop(hook Hook) *Frame {
 	return f
 }
 
-// RegisterComponent 注册组件
-func (f *Frame) RegisterComponent(component Component) {
+// RegisterComponent 注册组件，按注册顺序启动、反序停止。同一类型可注册多次。
+// 进程内只应有一个的组件请用 RegisterSingleton。
+func (f *Frame) RegisterComponent(component Component) *Frame {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.components = append(f.components, component)
+	return f
 }
 
-// SetLogger 设置日志记录器
-func (f *Frame) SetLogger(logger *zap.Logger) {
-	f.logger = logger
+// RegisterSingleton 注册进程内单例组件，key 重复会 panic。
+func (f *Frame) RegisterSingleton(key string, component Component) *Frame {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.singletons[key] {
+		panic("frame: singleton component with key " + key + " is already registered, " +
+			"call RegisterSingleton with this key only once per Frame")
+	}
+	f.singletons[key] = true
+	f.components = append(f.components, component)
+	return f
 }
 
-// Run 运行框架并处理信号
+// Run 阻塞运行：Start → AfterStart 钩子 → 等待信号 → BeforeStop 钩子 → Stop。
+// 等价于 RunContext(context.Background())。
 func (f *Frame) Run() error {
-	// 创建根上下文
-	ctx, cancel := context.WithCancel(context.Background())
+	return f.RunContext(context.Background())
+}
+
+// RunContext 同 Run，使用调用方传入的根 context。
+// SIGINT/SIGTERM 优雅退出；SIGHUP 默认触发 Restart，可用 WithRestartSignal(false) 关闭。
+func (f *Frame) RunContext(ctx context.Context) error {
+	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// 启动框架
-	if err := f.Start(ctx); err != nil {
+	// 启动所有组件
+	if err := f.Start(runCtx); err != nil {
+		return err
+	}
+	f.logInfo("frame started successfully")
+
+	// 执行 AfterStart 钩子
+	if err := f.runHooks(runCtx, f.snapshotHooks(true)); err != nil {
+		f.logError("after start hook failed", err)
+		_ = f.Stop(runCtx)
 		return err
 	}
 
-	if f.logger != nil {
-		f.logger.Info("Framework started successfully")
+	// 监听信号
+	signals := []os.Signal{syscall.SIGINT, syscall.SIGTERM}
+	if f.config.EnableRestartSignal {
+		signals = append(signals, syscall.SIGHUP)
 	}
-
-	// 执行启动后的钩子函数
-	for _, hook := range f.afterStartHooks {
-		if err := hook(ctx); err != nil {
-			if f.logger != nil {
-				f.logger.Error("Error executing after start hook", zap.Error(err))
-			}
-			return err
-		}
-	}
-
-	// 设置信号处理
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(sigChan, signals...)
+	defer signal.Stop(sigChan)
 
 	// 等待信号
-	sig := <-sigChan
-	fmt.Println("\n收到 Ctrl+C，正在退出...")
-	if f.logger != nil {
-		f.logger.Debug("接收到退出信号", zap.String("信号signal", sig.String()))
-	}
-
-	// 执行停止前的钩子函数
-	for _, hook := range f.beforeStopHooks {
-		if err := hook(ctx); err != nil {
-			if f.logger != nil {
-				f.logger.Error("Error executing before stop hook", zap.Error(err))
+	for {
+		select {
+		case <-ctx.Done():
+			// 上下文取消，执行 shutdown
+			return f.shutdown(runCtx)
+		case sig := <-sigChan:
+			if sig == syscall.SIGHUP {
+				f.logInfo("received SIGHUP, restarting components")
+				if err := f.Restart(runCtx); err != nil {
+					f.logError("restart failed", err)
+					return err
+				}
+				f.logInfo("restart completed, still serving")
+				continue
 			}
-			// 继续执行其他钩子，但记录错误
+			f.logInfo("received signal " + sig.String() + ", shutting down")
+			return f.shutdown(runCtx)
 		}
 	}
+}
 
-	// 优雅关闭
+// shutdown 执行一次完整的优雅退出：BeforeStop 钩子 → Stop 所有组件。
+func (f *Frame) shutdown(ctx context.Context) error {
+	if err := f.runHooks(ctx, f.snapshotHooks(false)); err != nil {
+		f.logError("before stop hook failed", err)
+	}
+
 	if err := f.Stop(ctx); err != nil {
-		if f.logger != nil {
-			f.logger.Error("Error during framework shutdown", zap.Error(err))
-		}
+		f.logError("error during framework shutdown", err)
 		return err
 	}
 
-	if f.logger != nil {
-		f.logger.Info("Framework stopped gracefully")
-	}
-
+	f.logInfo("frame stopped gracefully")
 	return nil
 }
 
-// Start 启动框架
+// Start 按注册顺序启动所有组件；某个组件启动失败时，回滚（反序 Stop）已启动的组件并返回错误。
 func (f *Frame) Start(ctx context.Context) error {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
+	f.mu.Lock()
+	if f.state == stateRunning {
+		f.mu.Unlock()
+		return nil
+	}
+	components := f.components
+	f.mu.Unlock()
 
-	// 启动所有组件
-	for i, component := range f.components {
+	for i, component := range components {
 		if err := component.Start(ctx); err != nil {
-			// 启动失败时，停止已启动的组件
 			for j := i - 1; j >= 0; j-- {
-				if stopErr := f.components[j].Stop(ctx); stopErr != nil {
-					// 记录错误但继续关闭
-					if f.logger != nil {
-						f.logger.Error("Error stopping component during startup failure",
-							zap.Int("component_index", j),
-							zap.Error(stopErr),
-						)
-					}
+				if stopErr := components[j].Stop(ctx); stopErr != nil {
+					f.logError(fmt.Sprintf("error stopping component %d during startup rollback", j), stopErr)
 				}
 			}
-			return fmt.Errorf("failed to start component %d: %v", i, err)
+			return fmt.Errorf("failed to start component %d: %w", i, err)
 		}
 	}
+
+	f.mu.Lock()
+	f.state = stateRunning
+	f.mu.Unlock()
 	return nil
 }
 
-// Stop 停止框架
+// Stop 按注册的反序停止所有组件，尽力执行完所有组件的 Stop（单个组件失败不影响其它组件），
+// 最终返回遇到的最后一个错误（如果有）。
 func (f *Frame) Stop(ctx context.Context) error {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
+	f.mu.Lock()
+	if f.state == stateStopped {
+		f.mu.Unlock()
+		return nil
+	}
+	components := f.components
+	f.mu.Unlock()
 
-	// 创建带超时的上下文
 	shutdownCtx, cancel := context.WithTimeout(ctx, f.config.ShutdownTimeout)
 	defer cancel()
 
-	// 按照注册的反序停止组件
 	var lastErr error
-	for i := len(f.components) - 1; i >= 0; i-- {
-		if err := f.components[i].Stop(shutdownCtx); err != nil {
+	for i := len(components) - 1; i >= 0; i-- {
+		if err := components[i].Stop(shutdownCtx); err != nil {
 			lastErr = err
-			if f.logger != nil {
-				f.logger.Error("Error stopping component",
-					zap.Int("component_index", i),
-					zap.Error(err),
-				)
-			}
+			f.logError(fmt.Sprintf("error stopping component %d", i), err)
 		}
 	}
+
+	f.mu.Lock()
+	f.state = stateStopped
+	f.mu.Unlock()
 	return lastErr
+}
+
+// Restart 先 Stop 再 Start，不重新执行 AfterStart/BeforeStop。
+func (f *Frame) Restart(ctx context.Context) error {
+	if err := f.Stop(ctx); err != nil {
+		f.logError("restart: stop phase failed, continuing to start", err)
+	}
+	return f.Start(ctx)
+}
+
+func (f *Frame) snapshotHooks(afterStart bool) []Hook {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	if afterStart {
+		out := make([]Hook, len(f.afterStartHooks))
+		copy(out, f.afterStartHooks)
+		return out
+	}
+	out := make([]Hook, len(f.beforeStopHooks))
+	copy(out, f.beforeStopHooks)
+	return out
+}
+
+func (f *Frame) runHooks(ctx context.Context, hooks []Hook) error {
+	for _, hook := range hooks {
+		if err := hook(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (f *Frame) logInfo(msg string) {
+	logger.Info(msg)
+}
+
+func (f *Frame) logError(msg string, err error) {
+	logger.Error(msg, zap.Error(err))
+	alert.Notify(context.Background(), alert.Event{Scope: "frame", Message: msg, Err: err})
 }
