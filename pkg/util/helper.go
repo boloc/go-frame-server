@@ -16,7 +16,7 @@ type MySQLDSNConfig struct {
 	Port      int    `mapstructure:"port"`
 	Name      string `mapstructure:"name"`
 	Charset   string `mapstructure:"charset"`   // 可选，如 utf8mb4
-	Collation string `mapstructure:"collation"` // 可选，如 utf8mb4_general_ci
+	Collation string `mapstructure:"collation"` // 可选，推荐 utf8mb4_0900_ai_ci（MySQL 8.0+）
 	Loc       string `mapstructure:"loc"`       // 可选，IANA 时区名（如 Asia/Shanghai）或 Local，默认 UTC
 }
 

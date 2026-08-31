@@ -3,6 +3,7 @@ package cron
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -132,7 +133,16 @@ func (c *Component) wrap(t Task) func(ctx context.Context) {
 		elapsed := time.Since(start)
 
 		status := "success"
-		if err != nil {
+		switch {
+		case err == nil:
+			logger.Info("cron: task finished",
+				zap.String("task", t.Name), zap.Duration("elapsed", elapsed))
+		case errors.Is(err, context.Canceled):
+			// 进程退出时 Stop 会取消任务 ctx，查库/刷缓存被掐断是正常收尾，不当失败、不告警。
+			status = "canceled"
+			logger.Info("cron: task canceled",
+				zap.String("task", t.Name), zap.Duration("elapsed", elapsed))
+		default:
 			status = "failure"
 			logger.Error("cron: task failed",
 				zap.String("task", t.Name), zap.Duration("elapsed", elapsed), zap.Error(err))
@@ -140,9 +150,6 @@ func (c *Component) wrap(t Task) func(ctx context.Context) {
 				Scope: "cron", Name: t.Name, Message: "task failed", Err: err,
 				Fields: map[string]any{"elapsed": elapsed.String()},
 			})
-		} else {
-			logger.Info("cron: task finished",
-				zap.String("task", t.Name), zap.Duration("elapsed", elapsed))
 		}
 		c.runsTotal.WithLabelValues(t.Name, status).Inc()
 		c.duration.WithLabelValues(t.Name).Observe(elapsed.Seconds())

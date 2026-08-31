@@ -1,0 +1,1405 @@
+{
+  "info": {
+    "description": "cmd/example 的 HTTP 接口文档。请导入同目录的 example-apifox.openapi.json（导入 → OpenAPI/Swagger）。\n\n本文件不使用 components / $ref / 数据模型，请求和响应都按真实返回字段写成示例数据。\n\n约定：\n- 业务接口默认 HTTP 200，成功看 `code=0`，失败看 body 里的 `code` / `message` / `fields`\n- 只有明确调用 `webx.FailWithStatus` 的接口才会返回非 200 的 HTTP 状态码\n- 端口以配置 `server.port` 为准，示例配置是 `10005`\n- `/test` 下的接口需要请求头 `X-Demo-Token`（任意非空值即可，例如 `x`）\n- `POST /api/orders` 必须带 `Idempotency-Key`\n- `/api/products` 组限流：同一 IP 每分钟 10 次，超限 HTTP 429\n",
+    "title": "go-frame-server example",
+    "version": "1.0.0"
+  },
+  "openapi": "3.0.0",
+  "paths": {
+    "/api/cron/report-low-stock": {
+      "post": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 0,
+                  "data": {
+                    "message": "库存检查已执行"
+                  },
+                  "message": "success"
+                },
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "统一响应"
+          }
+        },
+        "summary": "立即执行一次库存检查",
+        "tags": [
+          "定时任务"
+        ]
+      }
+    },
+    "/api/cron/tasks": {
+      "get": {
+        "description": "TaskInfo 没有 json tag，字段名是 Name / Schedule。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 0,
+                  "data": [
+                    {
+                      "Name": "heartbeat",
+                      "Schedule": "@every 30s"
+                    },
+                    {
+                      "Name": "minute-marker",
+                      "Schedule": "0 * * * * *"
+                    },
+                    {
+                      "Name": "report-low-stock",
+                      "Schedule": "0 */5 * * * *"
+                    }
+                  ],
+                  "message": "success"
+                },
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "统一响应"
+          }
+        },
+        "summary": "已注册定时任务列表",
+        "tags": [
+          "定时任务"
+        ]
+      }
+    },
+    "/api/orders": {
+      "post": {
+        "description": "必须带 `Idempotency-Key`。内存仓储预置数据：\n- product_id=1 有货（库存 10）\n- product_id=2 售罄\n- product_id=3 不存在\n- product_id=4 已下架，校验层直接拒绝\n- product_id=999 模拟数据库故障\n",
+        "parameters": [
+          {
+            "example": "demo-key-1",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              },
+              "example": {
+                "product_id": 1,
+                "quantity": 2
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                },
+                "example": {
+                  "code": 0,
+                  "data": {
+                    "id": 1,
+                    "product_id": 1,
+                    "quantity": 2,
+                    "status": "created"
+                  },
+                  "message": "success"
+                }
+              }
+            },
+            "description": "统一响应（默认 HTTP 200，错误看 body.code）"
+          }
+        },
+        "summary": "创建订单",
+        "tags": [
+          "订单"
+        ]
+      }
+    },
+    "/api/products/list": {
+      "get": {
+        "description": "分页列表。`page` 默认 1，`page_size` 默认 20，最大 500。\n该组接口有限流：同一 IP 每分钟 10 次。\n",
+        "parameters": [
+          {
+            "example": 1,
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "example": 20,
+            "in": "query",
+            "name": "page_size",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "1=上架 0=下架，不传查全部",
+            "example": 1,
+            "in": "query",
+            "name": "status",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "关键词，最长 50",
+            "example": "导航",
+            "in": "query",
+            "name": "keyword",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "example": 1,
+            "in": "query",
+            "name": "column_id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                },
+                "example": {
+                  "code": 0,
+                  "data": {
+                    "list": [
+                      {
+                        "column_id": 1,
+                        "count": 128,
+                        "cover": "https://cdn.example.com/cover.jpg",
+                        "created_at": "2026-08-15 10:00:00",
+                        "custom_name": "客户A",
+                        "id": 1,
+                        "is_skip_detail": 0,
+                        "jump_url": "https://example.com/p/1",
+                        "sort": 1,
+                        "status": 1,
+                        "status_text": "上架",
+                        "tags": [
+                          "热门",
+                          "推荐"
+                        ],
+                        "title": "示例产品"
+                      }
+                    ],
+                    "page": 1,
+                    "page_size": 20,
+                    "total": 1,
+                    "total_pages": 1
+                  },
+                  "message": "success"
+                }
+              }
+            },
+            "description": "统一响应"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 42900,
+                  "message": "请求过于频繁，请稍后重试"
+                },
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "触发限流",
+            "headers": {
+              "Retry-After": {
+                "example": "60",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-RateLimit-Limit": {
+                "example": "10",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-RateLimit-Remaining": {
+                "example": "0",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "summary": "产品列表",
+        "tags": [
+          "产品"
+        ]
+      }
+    },
+    "/api/products/options": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 0,
+                  "data": {
+                    "status_options": [
+                      {
+                        "label": "上架",
+                        "value": 1
+                      },
+                      {
+                        "label": "下架",
+                        "value": 0
+                      }
+                    ]
+                  },
+                  "message": "success"
+                },
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "统一响应"
+          }
+        },
+        "summary": "产品状态下拉选项",
+        "tags": [
+          "产品"
+        ]
+      }
+    },
+    "/api/products/summary": {
+      "get": {
+        "description": "读 refreshcache 内存值，不查库。缓存未就绪时返回内部错误。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                },
+                "example": {
+                  "code": 0,
+                  "data": {
+                    "active_count": 12
+                  },
+                  "message": "success"
+                }
+              }
+            },
+            "description": "统一响应"
+          }
+        },
+        "summary": "上架产品数量",
+        "tags": [
+          "产品"
+        ]
+      }
+    },
+    "/api/products/{id}": {
+      "get": {
+        "description": "详情来自 default_db，公告 notice 来自 config_db 的 `product.notice` 缓存。",
+        "parameters": [
+          {
+            "example": 1,
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                },
+                "example": {
+                  "code": 0,
+                  "data": {
+                    "column_id": 1,
+                    "count": 128,
+                    "cover": "https://cdn.example.com/cover.jpg",
+                    "created_at": "2026-08-15 10:00:00",
+                    "custom_name": "客户A",
+                    "id": 1,
+                    "is_skip_detail": 0,
+                    "jump_url": "https://example.com/p/1",
+                    "notice": "今日全场包邮",
+                    "sort": 1,
+                    "status": 1,
+                    "status_text": "上架",
+                    "tags": [
+                      "热门",
+                      "推荐"
+                    ],
+                    "title": "示例产品"
+                  },
+                  "message": "success"
+                }
+              }
+            },
+            "description": "统一响应"
+          }
+        },
+        "summary": "产品详情",
+        "tags": [
+          "产品"
+        ]
+      }
+    },
+    "/api/products/{id}/status": {
+      "post": {
+        "parameters": [
+          {
+            "example": 1,
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "status": 0
+              },
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                },
+                "example": {
+                  "code": 0,
+                  "message": "success"
+                }
+              }
+            },
+            "description": "统一响应"
+          }
+        },
+        "summary": "更新产品上架/下架状态",
+        "tags": [
+          "产品"
+        ]
+      }
+    },
+    "/api/system-configs/{key}": {
+      "get": {
+        "description": "读 config_db 从库。示例 key 是产品详情页公告 `product.notice`。",
+        "parameters": [
+          {
+            "example": "product.notice",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                },
+                "example": {
+                  "code": 0,
+                  "data": {
+                    "key": "product.notice",
+                    "value": "今日全场包邮"
+                  },
+                  "message": "success"
+                }
+              }
+            },
+            "description": "统一响应"
+          }
+        },
+        "summary": "按 key 读取系统配置",
+        "tags": [
+          "系统"
+        ]
+      },
+      "post": {
+        "description": "写 config_db 主库，存在则更新。",
+        "parameters": [
+          {
+            "example": "product.notice",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "value": "今日全场包邮"
+              },
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                },
+                "example": {
+                  "code": 0,
+                  "message": "success"
+                }
+              }
+            },
+            "description": "统一响应"
+          }
+        },
+        "summary": "写入系统配置",
+        "tags": [
+          "系统"
+        ]
+      }
+    },
+    "/health": {
+      "get": {
+        "description": "检查 default_db / config_db / redis（关键依赖）和 log_db（非关键）。关键依赖失败时 HTTP 503。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "checks": {
+                    "config_db": {
+                      "latency_ms": 1.4,
+                      "status": "ok"
+                    },
+                    "default_db": {
+                      "latency_ms": 1.2,
+                      "status": "ok"
+                    },
+                    "log_db": {
+                      "latency_ms": 1.1,
+                      "status": "ok"
+                    },
+                    "redis": {
+                      "latency_ms": 0.4,
+                      "status": "ok"
+                    }
+                  },
+                  "healthy": true
+                },
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "整体健康"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "checks": {
+                    "config_db": {
+                      "latency_ms": 1.4,
+                      "status": "ok"
+                    },
+                    "default_db": {
+                      "error": "db not initialized",
+                      "latency_ms": 3.1,
+                      "status": "error"
+                    },
+                    "log_db": {
+                      "error": "db not initialized",
+                      "latency_ms": 1,
+                      "status": "error"
+                    },
+                    "redis": {
+                      "latency_ms": 0.4,
+                      "status": "ok"
+                    }
+                  },
+                  "healthy": false
+                },
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "关键依赖不健康"
+          }
+        },
+        "summary": "健康检查",
+        "tags": [
+          "系统"
+        ]
+      }
+    },
+    "/metrics": {
+      "get": {
+        "description": "进程级指标和连接池指标。生产环境建议配置 prometheus.password。",
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain": {
+                "example": "# HELP go_goroutines Number of goroutines that currently exist.\n# TYPE go_goroutines gauge\ngo_goroutines 12\n",
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Prometheus 文本"
+          }
+        },
+        "summary": "Prometheus 指标",
+        "tags": [
+          "系统"
+        ]
+      }
+    },
+    "/test/business-error": {
+      "get": {
+        "description": "CodeOrderAlreadyPaid = 10001，已登记默认文案。",
+        "parameters": [
+          {
+            "example": "x",
+            "in": "header",
+            "name": "X-Demo-Token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 10001,
+                  "message": "订单已支付，请勿重复支付"
+                },
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "webx.Fail，HTTP 200"
+          }
+        },
+        "summary": "业务自定义错误码",
+        "tags": [
+          "能力演示"
+        ]
+      }
+    },
+    "/test/database-error": {
+      "get": {
+        "description": "对外统一文案，原始错误只进日志。",
+        "parameters": [
+          {
+            "example": "x",
+            "in": "header",
+            "name": "X-Demo-Token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 50001,
+                  "message": "数据处理失败"
+                },
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "webx.Fail，HTTP 200"
+          }
+        },
+        "summary": "数据库错误",
+        "tags": [
+          "能力演示"
+        ]
+      }
+    },
+    "/test/error-source": {
+      "get": {
+        "parameters": [
+          {
+            "example": "x",
+            "in": "header",
+            "name": "X-Demo-Token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 0,
+                  "data": {
+                    "caller": "internal/example/handler/capability_handler.go:94",
+                    "code": 50001,
+                    "hint": "caller 精确指向 capability_handler.go 里 simulateQueryFailure 调用 errs.Database 的那一行，即使中间经过了两层普通函数调用",
+                    "message": "数据处理失败"
+                  },
+                  "message": "success"
+                },
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "统一响应"
+          }
+        },
+        "summary": "查看错误 Caller",
+        "tags": [
+          "能力演示"
+        ]
+      }
+    },
+    "/test/http-client/named-timeout": {
+      "get": {
+        "description": "30ms 超时的命名客户端先失败，默认 5s 客户端能等到下游 150ms 后的 200。",
+        "parameters": [
+          {
+            "example": "x",
+            "in": "header",
+            "name": "X-Demo-Token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 0,
+                  "data": {
+                    "default_client_error": "",
+                    "default_client_status": 200,
+                    "fast_client_timeout_error": "Get http://127.0.0.1:xxxxx: context deadline exceeded",
+                    "hint": "30ms 超时的命名客户端应该先超时失败，默认客户端（5s 超时）应该等到下游 150ms 之后正常返回 200"
+                  },
+                  "message": "success"
+                },
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "统一响应"
+          }
+        },
+        "summary": "命名客户端超时隔离",
+        "tags": [
+          "HTTP客户端演示"
+        ]
+      }
+    },
+    "/test/http-client/no-retry-post": {
+      "get": {
+        "description": "backend_hits 应为 1，状态码是下游的 500。",
+        "parameters": [
+          {
+            "example": "x",
+            "in": "header",
+            "name": "X-Demo-Token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 0,
+                  "data": {
+                    "backend_hits": 1,
+                    "error": "",
+                    "hint": "POST 默认不重试（避免重复提交），backend_hits 应该是 1，且状态码是下游的 500",
+                    "status_code": 500
+                  },
+                  "message": "success"
+                },
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "统一响应"
+          }
+        },
+        "summary": "POST 默认不重试",
+        "tags": [
+          "HTTP客户端演示"
+        ]
+      }
+    },
+    "/test/http-client/retry-get": {
+      "get": {
+        "description": "下游前 2 次 500，GET 会自动重试，第 3 次成功。backend_hits 应为 3。",
+        "parameters": [
+          {
+            "example": "x",
+            "in": "header",
+            "name": "X-Demo-Token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 0,
+                  "data": {
+                    "backend_hits": 3,
+                    "hint": "GET 是幂等方法，前 2 次 500 会被自动重试，backend_hits 应该是 3",
+                    "status_code": 200
+                  },
+                  "message": "success"
+                },
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "统一响应"
+          }
+        },
+        "summary": "GET 默认会重试",
+        "tags": [
+          "HTTP客户端演示"
+        ]
+      }
+    },
+    "/test/http-client/retry-post-allowed": {
+      "get": {
+        "description": "RetryAllowNonIdempotent=true 后 POST 也会重试到成功，backend_hits 应为 3。",
+        "parameters": [
+          {
+            "example": "x",
+            "in": "header",
+            "name": "X-Demo-Token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 0,
+                  "data": {
+                    "backend_hits": 3,
+                    "hint": "显式 RetryAllowNonIdempotent=true 之后 POST 也会重试，backend_hits 应该是 3",
+                    "status_code": 200
+                  },
+                  "message": "success"
+                },
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "统一响应"
+          }
+        },
+        "summary": "显式允许 POST 重试",
+        "tags": [
+          "HTTP客户端演示"
+        ]
+      }
+    },
+    "/test/not-found": {
+      "get": {
+        "parameters": [
+          {
+            "example": "x",
+            "in": "header",
+            "name": "X-Demo-Token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 40400,
+                  "message": "演示用：这个资源不存在"
+                },
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "webx.Fail，HTTP 200"
+          }
+        },
+        "summary": "业务码 40400，HTTP 仍是 200",
+        "tags": [
+          "能力演示"
+        ]
+      }
+    },
+    "/test/not-found-with-status": {
+      "get": {
+        "parameters": [
+          {
+            "example": "x",
+            "in": "header",
+            "name": "X-Demo-Token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "404": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 40400,
+                  "message": "演示用：这个资源不存在"
+                },
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "webx.FailWithStatus"
+          }
+        },
+        "summary": "业务码 40400，真实 HTTP 404",
+        "tags": [
+          "能力演示"
+        ]
+      }
+    },
+    "/test/panic": {
+      "get": {
+        "description": "被 gin.Recovery 兜住，进程不退出，返回默认 500，不是 webx 统一响应。",
+        "parameters": [
+          {
+            "example": "x",
+            "in": "header",
+            "name": "X-Demo-Token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "500": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "error": "演示用：故意触发一次 panic"
+                },
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "gin Recovery 默认响应"
+          }
+        },
+        "summary": "故意 panic",
+        "tags": [
+          "能力演示"
+        ]
+      }
+    },
+    "/test/storage/objects": {
+      "delete": {
+        "parameters": [
+          {
+            "example": "x",
+            "in": "header",
+            "name": "X-Demo-Token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "example": "uploads/a1b2c3d4.jpg",
+            "in": "query",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                },
+                "example": {
+                  "code": 0,
+                  "message": "success"
+                }
+              }
+            },
+            "description": "统一响应"
+          }
+        },
+        "summary": "删除对象",
+        "tags": [
+          "对象存储演示"
+        ]
+      },
+      "get": {
+        "parameters": [
+          {
+            "example": "x",
+            "in": "header",
+            "name": "X-Demo-Token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "example": "uploads/",
+            "in": "query",
+            "name": "prefix",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "example": 20,
+            "in": "query",
+            "name": "max_keys",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                },
+                "example": {
+                  "code": 0,
+                  "data": {
+                    "keys": [
+                      "uploads/a1b2c3d4.jpg",
+                      "uploads/e5f6g7h8.png"
+                    ]
+                  },
+                  "message": "success"
+                }
+              }
+            },
+            "description": "统一响应"
+          }
+        },
+        "summary": "按前缀列出对象",
+        "tags": [
+          "对象存储演示"
+        ]
+      }
+    },
+    "/test/storage/presigned-url": {
+      "get": {
+        "description": "expires_seconds 不传或小于等于 0 时默认 15 分钟。",
+        "parameters": [
+          {
+            "example": "x",
+            "in": "header",
+            "name": "X-Demo-Token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "example": "uploads/a1b2c3d4.jpg",
+            "in": "query",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "example": 900,
+            "in": "query",
+            "name": "expires_seconds",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                },
+                "example": {
+                  "code": 0,
+                  "data": {
+                    "expires_in": "15m0s",
+                    "url": "https://xxx.r2.cloudflarestorage.com/bucket/uploads/a1b2c3d4.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Expires=900"
+                  },
+                  "message": "success"
+                }
+              }
+            },
+            "description": "统一响应"
+          }
+        },
+        "summary": "生成预签名 URL",
+        "tags": [
+          "对象存储演示"
+        ]
+      }
+    },
+    "/test/storage/upload": {
+      "post": {
+        "description": "multipart 字段名是 `file`。未配置 `storage.r2` 时返回依赖错误，不会 panic。UploadResult 没有 json tag，字段名是 URL / Key / Size / ContentType。",
+        "parameters": [
+          {
+            "example": "x",
+            "in": "header",
+            "name": "X-Demo-Token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "properties": {
+                  "file": {
+                    "format": "binary",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "file"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                },
+                "example": {
+                  "code": 0,
+                  "data": {
+                    "ContentType": "image/jpeg",
+                    "Key": "uploads/a1b2c3d4.jpg",
+                    "Size": 20480,
+                    "URL": "https://cdn.example.com/uploads/a1b2c3d4.jpg"
+                  },
+                  "message": "success"
+                }
+              }
+            },
+            "description": "统一响应"
+          }
+        },
+        "summary": "上传文件",
+        "tags": [
+          "对象存储演示"
+        ]
+      }
+    },
+    "/test/success": {
+      "get": {
+        "parameters": [
+          {
+            "example": "x",
+            "in": "header",
+            "name": "X-Demo-Token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                },
+                "example": {
+                  "code": 0,
+                  "data": {
+                    "hello": "world"
+                  },
+                  "message": "success"
+                }
+              }
+            },
+            "description": "统一响应"
+          }
+        },
+        "summary": "成功响应",
+        "tags": [
+          "能力演示"
+        ]
+      }
+    },
+    "/test/timezone": {
+      "get": {
+        "description": "用 `SELECT ?` 把当前时间经 default_db 走一圈，不写业务表。",
+        "parameters": [
+          {
+            "example": "x",
+            "in": "header",
+            "name": "X-Demo-Token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 0,
+                  "data": {
+                    "go_time_now": "2026-08-15 10:23:00 +0000 UTC",
+                    "hint": "go_time_now 是项目时区（server.timezone）下的当前时间；mysql_round_trip_raw 是同一个瞬间经过 default_db 连接写入再读出后，按那个连接自己的 loc 解释出来的值；mysql_round_trip_display 是再转换回项目时区后应该展示给用户的值。",
+                    "mysql_round_trip_display": "2026-08-15 10:23:00",
+                    "mysql_round_trip_raw": "2026-08-15 10:23:00 +0000 UTC",
+                    "process_timezone": "UTC"
+                  },
+                  "message": "success"
+                },
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "统一响应"
+          }
+        },
+        "summary": "时区对照",
+        "tags": [
+          "能力演示"
+        ]
+      }
+    },
+    "/test/unauthorized": {
+      "get": {
+        "parameters": [
+          {
+            "example": "x",
+            "in": "header",
+            "name": "X-Demo-Token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 40100,
+                  "message": "未登录或登录已过期"
+                },
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "webx.Fail，HTTP 200"
+          }
+        },
+        "summary": "未登录",
+        "tags": [
+          "能力演示"
+        ]
+      }
+    },
+    "/test/validation-error": {
+      "get": {
+        "description": "不传 id 或传 id=0 会触发 validate required，响应带 fields。",
+        "parameters": [
+          {
+            "example": "x",
+            "in": "header",
+            "name": "X-Demo-Token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "example": 0,
+            "in": "query",
+            "name": "id",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                },
+                "example": {
+                  "code": 0,
+                  "data": {
+                    "ID": 1
+                  },
+                  "message": "success"
+                }
+              }
+            },
+            "description": "统一响应"
+          }
+        },
+        "summary": "字段校验失败",
+        "tags": [
+          "能力演示"
+        ]
+      }
+    }
+  },
+  "servers": [
+    {
+      "description": "本地 example",
+      "url": "http://127.0.0.1:10005"
+    }
+  ],
+  "tags": [
+    {
+      "name": "系统"
+    },
+    {
+      "name": "产品"
+    },
+    {
+      "name": "订单"
+    },
+    {
+      "name": "定时任务"
+    },
+    {
+      "name": "能力演示"
+    },
+    {
+      "name": "HTTP客户端演示"
+    },
+    {
+      "name": "对象存储演示"
+    }
+  ]
+}

@@ -1,25 +1,28 @@
-#:schema https://json.schemastore.org/any.json
+# Air 热重载：在仓库根目录执行 `air`。
+# 入口是 cmd/example（package main），配置默认走 ./config/frame-server.yml。
 
 root = "."
 testdata_dir = "testdata"
 tmp_dir = "tmp"
 
 [build]
+  # 编整个 example 包，不要写成单个 .go 文件（同目录还有 bootstrap/route）。
+  cmd = "go build -o ./tmp/main -ldflags='-s -w' ./cmd/example"
+  entrypoint = ["./tmp/main", "-c", "./config/frame-server.yml"]
   args_bin = []
-  # bin = "./tmp/main"
-  cmd = "go build -o ./tmp/main-demo -ldflags='-s -w' cmd/example/main-demo.go"
-  entrypoint = ["./tmp/main-demo","-c","./config/frame-server.yml"]
-  exclude_dir = ["assets", "tmp", "vendor", "testdata"]
+  full_bin = "" # 全路径二进制文件
   delay = 1000 # 构建延迟时间，单位毫秒
-  exclude_file = []
-  exclude_regex = ["_test.go"]
-  exclude_unchanged = false
-  follow_symlink = false
-  full_bin = ""
-  include_dir = []
-  include_ext = ["go", "tpl", "tmpl", "html"]
-  include_file = []
-  kill_delay = "0s"
+  exclude_dir = ["assets", "tmp", "vendor", "testdata", "logs", "docs", ".git", ".cursor"] # 排除目录
+  exclude_file = [] # 排除文件
+  exclude_regex = ["_test.go"] # 排除正则表达式
+  exclude_unchanged = false # 是否排除未更改的文件
+  follow_symlink = false # 是否跟随符号链接
+  include_dir = [] # 包含目录
+  include_ext = ["go", "yml", "yaml", "tpl", "tmpl", "html"] # 包含扩展名
+  include_file = [] # 包含文件
+  # Frame 靠 SIGINT/SIGTERM 优雅退出；先发中断，再等一会，避免热重载直接 SIGKILL。
+  send_interrupt = true
+  kill_delay = "5s"
   log = "build-errors.log"
   poll = false
   poll_interval = 0
@@ -27,8 +30,7 @@ tmp_dir = "tmp"
   pre_cmd = []
   rerun = false
   rerun_delay = 500
-  send_interrupt = false
-  stop_on_error = false
+  stop_on_error = true
 
 [color]
   app = ""
@@ -38,8 +40,8 @@ tmp_dir = "tmp"
   watcher = "cyan"
 
 [log]
-  main_only = false # 只显示主日志
-  silent = false # 是否静音
+  main_only = false # 是否只显示主进程的日志
+  silent = false # 是否不显示日志
   time = true # 是否显示时间
 
 [misc]
@@ -51,5 +53,5 @@ tmp_dir = "tmp"
   proxy_port = 0 # 代理端口
 
 [screen]
-  clear_on_rebuild = false # 清除屏幕
-  keep_scroll = true # 保持滚动
+  clear_on_rebuild = false # 是否在重建时清除屏幕
+  keep_scroll = true # 是否保持滚动

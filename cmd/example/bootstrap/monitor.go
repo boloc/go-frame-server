@@ -12,20 +12,18 @@ import (
 )
 
 // SetupMonitor 注册进程级指标和 MySQL/Redis 连接池采集器，返回 /metrics 的 handler 链。
-// 配置了 prometheus.password 时，链上会带 Basic Auth。
+// redisComponent 可以是单机、集群或哨兵组件；配置了 prometheus.password 时，链上会带 Basic Auth。
 func SetupMonitor(
 	f *frame.Frame,
 	conf *config.ConfigComponent,
 	mysqlInstances map[string]*components.MySQLComponent,
-	redisComponent *components.RedisComponent,
+	redisComponent components.RedisPoolStatsProvider,
 ) []gin.HandlerFunc {
 	metricsComponent := monitor.NewMetricsComponent()
 	f.RegisterComponent(metricsComponent)
 
-	for name, m := range mysqlInstances {
-		if m != nil {
-			prometheus.MustRegister(components.NewMySQLPoolCollector(name, m))
-		}
+	if len(mysqlInstances) > 0 {
+		prometheus.MustRegister(components.NewMySQLPoolCollector(mysqlInstances))
 	}
 	if redisComponent != nil {
 		prometheus.MustRegister(components.NewRedisPoolCollector("default", redisComponent))

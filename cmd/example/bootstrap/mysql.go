@@ -15,6 +15,7 @@ type DatabaseConfig struct {
 	MaxIdleConns    int                   `mapstructure:"max_idle_conns"`    // 设置空闲连接池中的最大连接数
 	MaxOpenConns    int                   `mapstructure:"max_open_conns"`    // 设置打开数据库连接的最大数量
 	ConnMaxLifetime string                `mapstructure:"conn_max_lifetime"` // 设置连接可复用的最大时间 (类型为: time.Duration)
+	ConnMaxIdleTime string                `mapstructure:"conn_max_idle_time"` // 空闲超过该时间后从池中剔除，应明显小于 MySQL wait_timeout
 	Prefix          string                `mapstructure:"prefix"`            // 设置表前缀
 }
 
@@ -32,10 +33,14 @@ func buildMySQLComponent(conf *config.ConfigComponent, name string, isDefault bo
 		slavesDSN = append(slavesDSN, util.BuildMysqlDSN(slave))
 	}
 
-	// conn_max_lifetime 解析失败在启动时直接报错，避免静默落到默认值。
+	// 时间字段解析失败在启动时直接报错，避免静默落到默认值。
 	connMaxLifetime, err := config.ParseDuration(dbConfig.ConnMaxLifetime)
 	if err != nil {
 		panic("failed to parse database." + name + ".conn_max_lifetime: " + err.Error())
+	}
+	connMaxIdleTime, err := config.ParseDuration(dbConfig.ConnMaxIdleTime)
+	if err != nil {
+		panic("failed to parse database." + name + ".conn_max_idle_time: " + err.Error())
 	}
 
 	return components.NewMySQLComponent(
@@ -46,6 +51,7 @@ func buildMySQLComponent(conf *config.ConfigComponent, name string, isDefault bo
 			MaxIdleConns:    dbConfig.MaxIdleConns,
 			MaxOpenConns:    dbConfig.MaxOpenConns,
 			ConnMaxLifetime: connMaxLifetime,
+			ConnMaxIdleTime: connMaxIdleTime,
 			Prefix:          dbConfig.Prefix,
 			LogLevel:        components.GormLogLevelForEnv(conf.GetString("server.env")),
 		},

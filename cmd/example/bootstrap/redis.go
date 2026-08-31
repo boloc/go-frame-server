@@ -24,8 +24,8 @@ func SetupRedis(f *frame.Frame, conf *config.ConfigComponent) *components.RedisC
 	return redisComponent
 }
 
-// SetupRedisCluster 初始化Redis集群组件
-func SetupRedisCluster(f *frame.Frame, conf *config.ConfigComponent) {
+// SetupRedisCluster 初始化 Redis 集群组件，返回值给 SetupMonitor 挂连接池指标。
+func SetupRedisCluster(f *frame.Frame, conf *config.ConfigComponent) *components.RedisClusterComponent {
 	redisClusterComponent := components.NewRedisClusterComponent(
 		components.WithClusterAddrs(conf.GetStringSlice("redis.cluster.nodes")),
 		components.WithClusterPassword(conf.GetString("redis.cluster.password")),
@@ -40,10 +40,11 @@ func SetupRedisCluster(f *frame.Frame, conf *config.ConfigComponent) {
 		components.WithClusterMaxRetryBackoff(conf.GetStringTimeDuration("redis.cluster.max_retry_backoff")),
 	)
 	f.RegisterComponent(redisClusterComponent)
+	return redisClusterComponent
 }
 
-// SetupRedisSentinel 初始化 Redis 哨兵组件；与单机/集群三选一，按需替换 Setup 里的调用。
-func SetupRedisSentinel(f *frame.Frame, conf *config.ConfigComponent) {
+// SetupRedisSentinel 初始化 Redis 哨兵组件，返回值给 SetupMonitor 挂连接池指标。
+func SetupRedisSentinel(f *frame.Frame, conf *config.ConfigComponent) *components.RedisSentinelComponent {
 	redisSentinelComponent := components.NewRedisSentinelComponent(
 		components.WithSentinelMasterName(conf.GetString("redis.sentinel.master_name")),
 		components.WithSentinelAddrs(conf.GetStringSlice("redis.sentinel.addrs")),
@@ -58,4 +59,5 @@ func SetupRedisSentinel(f *frame.Frame, conf *config.ConfigComponent) {
 		components.WithSentinelMaxRetries(conf.GetInt("redis.sentinel.max_retries")),
 	)
 	f.RegisterComponent(redisSentinelComponent)
+	return redisSentinelComponent
 }

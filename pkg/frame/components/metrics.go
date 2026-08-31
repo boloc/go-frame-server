@@ -1,6 +1,6 @@
 package components
 
-// 连接池指标采集：每个组件实例单独实现 prometheus.Collector，用 instance 标签区分。
+// 连接池指标采集：MySQL 多个命名实例共用一个 Collector，用 instance 标签区分。
 
 import (
 	"database/sql"
@@ -54,16 +54,22 @@ var (
 	}
 )
 
-// mysqlPoolCollector 采集单个 MySQLComponent 主库 + 所有从库的连接池指标。
+// mysqlPoolCollector 采集多个命名 MySQL 实例的主库 + 从库连接池指标。
+// 必须只注册一份：同一套 mysql_pool_* Desc 注册两次会 panic。
 type mysqlPoolCollector struct {
-	instance string
-	m        *MySQLComponent
+	instances map[string]*MySQLComponent
 }
 
-// NewMySQLPoolCollector 为指定 MySQLComponent 创建 prometheus.Collector。
-// instance 建议与 NewMySQLComponent 的 name 一致。
-func NewMySQLPoolCollector(instance string, m *MySQLComponent) prometheus.Collector {
-	return &mysqlPoolCollector{instance: instance, m: m}
+// NewMySQLPoolCollector 为全部命名 MySQL 实例创建一份 prometheus.Collector。
+// map 的 key 会打到 instance 标签，建议与 NewMySQLComponent 的 name 一致。
+func NewMySQLPoolCollector(instances map[string]*MySQLComponent) prometheus.Collector {
+	copied := make(map[string]*MySQLComponent, len(instances))
+	for name, m := range instances {
+		if m != nil {
+			copied[name] = m
+		}
+	}
+	return &mysqlPoolCollector{instances: copied}
 }
 
 func (c *mysqlPoolCollector) Describe(ch chan<- *prometheus.Desc) {
@@ -79,18 +85,19 @@ func (c *mysqlPoolCollector) Describe(ch chan<- *prometheus.Desc) {
 }
 
 func (c *mysqlPoolCollector) Collect(ch chan<- prometheus.Metric) {
-	master, replicas := c.m.poolStats()
-
-	if master != nil {
-		c.collectOne(ch, "master", "0", *master)
-	}
-	for i, stats := range replicas {
-		c.collectOne(ch, "slave", strconv.Itoa(i), stats)
+	for name, m := range c.instances {
+		master, replicas := m.poolStats()
+		if master != nil {
+			c.collectOne(ch, name, "master", "0", *master)
+		}
+		for i, stats := range replicas {
+			c.collectOne(ch, name, "slave", strconv.Itoa(i), stats)
+		}
 	}
 }
 
-func (c *mysqlPoolCollector) collectOne(ch chan<- prometheus.Metric, role, index string, s sql.DBStats) {
-	labels := []string{c.instance, role, index}
+func (c *mysqlPoolCollector) collectOne(ch chan<- prometheus.Metric, instance, role, index string, s sql.DBStats) {
+	labels := []string{instance, role, index}
 	ch <- prometheus.MustNewConstMetric(mysqlPoolDescs.maxOpen, prometheus.GaugeValue, float64(s.MaxOpenConnections), labels...)
 	ch <- prometheus.MustNewConstMetric(mysqlPoolDescs.open, prometheus.GaugeValue, float64(s.OpenConnections), labels...)
 	ch <- prometheus.MustNewConstMetric(mysqlPoolDescs.inUse, prometheus.GaugeValue, float64(s.InUse), labels...)
@@ -102,18 +109,18 @@ func (c *mysqlPoolCollector) collectOne(ch chan<- prometheus.Metric, role, index
 	ch <- prometheus.MustNewConstMetric(mysqlPoolDescs.maxLifetimeClosed, prometheus.CounterValue, float64(s.MaxLifetimeClosed), labels...)
 }
 
-// redisPoolStatsProvider 由单机/集群/哨兵 Redis 组件实现。
-type redisPoolStatsProvider interface {
+// RedisPoolStatsProvider 由单机/集群/哨兵 Redis 组件实现。
+type RedisPoolStatsProvider interface {
 	PoolStats() *redis.PoolStats
 }
 
 type redisPoolCollector struct {
 	instance string
-	provider redisPoolStatsProvider
+	provider RedisPoolStatsProvider
 }
 
 // NewRedisPoolCollector 为指定 Redis 组件（单机/集群/哨兵）创建 prometheus.Collector。
-func NewRedisPoolCollector(instance string, provider redisPoolStatsProvider) prometheus.Collector {
+func NewRedisPoolCollector(instance string, provider RedisPoolStatsProvider) prometheus.Collector {
 	return &redisPoolCollector{instance: instance, provider: provider}
 }
 

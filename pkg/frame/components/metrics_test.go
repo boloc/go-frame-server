@@ -26,7 +26,7 @@ func collectAll(t *testing.T, c prometheus.Collector) []prometheus.Metric {
 
 func TestMySQLPoolCollectorDescribeSendsAllDescs(t *testing.T) {
 	m := &MySQLComponent{config: &MySQLConfig{}}
-	c := NewMySQLPoolCollector("test_db", m)
+	c := NewMySQLPoolCollector(map[string]*MySQLComponent{"test_db": m})
 
 	ch := make(chan *prometheus.Desc, 64)
 	go func() {
@@ -47,11 +47,24 @@ func TestMySQLPoolCollectorDescribeSendsAllDescs(t *testing.T) {
 // TestMySQLPoolCollectorCollectWithoutMasterDoesNotPanic 验证 master 为 nil 时 Collect 不 panic、不产出指标。
 func TestMySQLPoolCollectorCollectWithoutMasterDoesNotPanic(t *testing.T) {
 	m := &MySQLComponent{config: &MySQLConfig{}}
-	c := NewMySQLPoolCollector("test_db", m)
+	c := NewMySQLPoolCollector(map[string]*MySQLComponent{"test_db": m})
 
 	metrics := collectAll(t, c)
 	if len(metrics) != 0 {
 		t.Fatalf("Collect() produced %d metrics for a component with no master, want 0", len(metrics))
+	}
+}
+
+// TestMySQLPoolCollectorRegisterMultipleInstancesOnce 三个命名实例必须只注册一份 Collector。
+func TestMySQLPoolCollectorRegisterMultipleInstancesOnce(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	c := NewMySQLPoolCollector(map[string]*MySQLComponent{
+		"default_db": {config: &MySQLConfig{}},
+		"config_db":  {config: &MySQLConfig{}},
+		"log_db":     {config: &MySQLConfig{}},
+	})
+	if err := reg.Register(c); err != nil {
+		t.Fatalf("Register() one collector for three instances: %v", err)
 	}
 }
 
@@ -107,7 +120,7 @@ func TestRedisPoolCollectorCollectWithStats(t *testing.T) {
 
 // TestRedisComponentsImplementPoolStatsProvider 验证三种 Redis 组件都实现 PoolStats 接口。
 func TestRedisComponentsImplementPoolStatsProvider(t *testing.T) {
-	var _ redisPoolStatsProvider = &RedisComponent{}
-	var _ redisPoolStatsProvider = &RedisClusterComponent{}
-	var _ redisPoolStatsProvider = &RedisSentinelComponent{}
+	var _ RedisPoolStatsProvider = &RedisComponent{}
+	var _ RedisPoolStatsProvider = &RedisClusterComponent{}
+	var _ RedisPoolStatsProvider = &RedisSentinelComponent{}
 }

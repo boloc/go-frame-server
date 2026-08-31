@@ -20,13 +20,17 @@ func Setup(f *frame.Frame, conf *config.ConfigComponent) {
 	configDBComponent := SetupNamedMySQL(f, conf, constant.MySQLConfigDB)
 	logDBComponent := SetupNamedMySQL(f, conf, constant.MySQLLogDB)
 
-	// 数据库自动迁移：由 database.auto_migrate 控制（默认关闭），在 MySQL Start 成功后执行。
+	// 数据库自动迁移：由 database.auto_migrate 控制（默认关闭）。
+	// 注册在 MySQL 之后、缓存之前，保证预热时表已经建好。
 	SetupMigration(f, conf)
 
-	// 初始化Redis
-	redisComponent := SetupRedis(f, conf)
+	// 初始化 Redis：单机 / 集群 / 哨兵三选一，只留一行生效。
+	// 当前走单机（读 redis.single）。换模式时改成下面注释里的调用。
+	// redisComponent := SetupRedis(f, conf)
+	redisComponent := SetupRedisCluster(f, conf) // 集群，读 redis.cluster
+	// redisComponent := SetupRedisSentinel(f, conf) // 哨兵，读 redis.sentinel
 
-	// 初始化ClickHouse
+	// 初始化 ClickHouse，由 clickhouse.enabled 控制（默认启用）。
 	SetupClickHouse(f, conf)
 
 	// 初始化定时任务调度器，随 Frame 生命周期启动/关闭；由 cron.enabled 控制（默认启用）。

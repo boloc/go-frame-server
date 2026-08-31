@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/boloc/go-frame-server/pkg/errs"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 )
@@ -292,6 +293,59 @@ func TestComponentCancelsTaskContextOnStop(t *testing.T) {
 	}
 	if !canceled.Load() {
 		t.Fatal("Stop 应该取消正在运行任务的 ctx，但任务没有观察到取消信号")
+	}
+}
+
+// TestComponentTreatsContextCanceledAsCanceledNotFailure 验证关进程时的 context.Canceled
+// （含被 errs.Database 包过的）记为 canceled，不记 failure。
+func TestComponentTreatsContextCanceledAsCanceledNotFailure(t *testing.T) {
+	c := NewComponent("test-canceled")
+	reg := prometheus.NewRegistry()
+	if err := reg.Register(c.runsTotal); err != nil {
+		t.Fatalf("注册 runsTotal 采集器失败: %v", err)
+	}
+
+	c.wrap(Task{Name: "plain", Run: func(context.Context) error { return context.Canceled }})(context.Background())
+	c.wrap(Task{Name: "wrapped", Run: func(context.Context) error { return errs.Database(context.Canceled) }})(context.Background())
+	c.wrap(Task{Name: "real", Run: func(context.Context) error { return errors.New("boom") }})(context.Background())
+
+	metrics, err := reg.Gather()
+	if err != nil {
+		t.Fatalf("Gather 失败: %v", err)
+	}
+
+	var sawPlainCanceled, sawWrappedCanceled, sawRealFailure, sawCanceledAsFailure bool
+	for _, m := range metrics {
+		if m.GetName() != "cron_task_runs_total" {
+			continue
+		}
+		for _, metric := range m.GetMetric() {
+			if hasLabel(metric, "task", "plain") && hasLabel(metric, "status", "canceled") && metric.GetCounter().GetValue() > 0 {
+				sawPlainCanceled = true
+			}
+			if hasLabel(metric, "task", "wrapped") && hasLabel(metric, "status", "canceled") && metric.GetCounter().GetValue() > 0 {
+				sawWrappedCanceled = true
+			}
+			if hasLabel(metric, "task", "real") && hasLabel(metric, "status", "failure") && metric.GetCounter().GetValue() > 0 {
+				sawRealFailure = true
+			}
+			if (hasLabel(metric, "task", "plain") || hasLabel(metric, "task", "wrapped")) &&
+				hasLabel(metric, "status", "failure") && metric.GetCounter().GetValue() > 0 {
+				sawCanceledAsFailure = true
+			}
+		}
+	}
+	if !sawPlainCanceled {
+		t.Fatal("context.Canceled 应该记为 status=canceled")
+	}
+	if !sawWrappedCanceled {
+		t.Fatal("errs.Database(context.Canceled) 应该记为 status=canceled")
+	}
+	if !sawRealFailure {
+		t.Fatal("真正的任务错误仍应记为 status=failure")
+	}
+	if sawCanceledAsFailure {
+		t.Fatal("取消不应记为 status=failure")
 	}
 }
 
