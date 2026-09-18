@@ -8,6 +8,7 @@ import (
 	"github.com/boloc/go-frame-server/pkg/alert"
 	"github.com/boloc/go-frame-server/pkg/errs"
 	"github.com/boloc/go-frame-server/pkg/frame"
+	"github.com/boloc/go-frame-server/pkg/frame/rediskey"
 	"github.com/boloc/go-frame-server/pkg/frame/reqctx"
 	"github.com/boloc/go-frame-server/pkg/frame/webx"
 	"github.com/boloc/go-frame-server/pkg/logger"
@@ -15,8 +16,6 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
-
-const DefaultKeyPrefix = "ratelimit:"
 
 // fixedWindowScript 用 redis.NewScript 包装：Run 先走 EVALSHA（只发 40 字节的 sha），
 // 遇到 NOSCRIPT 再退回 EVAL 把脚本体发过去并缓存。直接每次 EVAL 会让每个请求都把整段
@@ -70,9 +69,11 @@ func defaultKeyFunc(c *gin.Context) string {
 	return c.FullPath() + ":" + ip
 }
 
+// defaultOptions 在 Middleware 里调用，也就是路由注册阶段（GinComponent.Start 内），
+// 此时配置已经加载、rediskey 命名空间已经注入，所以可以直接取前缀。
 func defaultOptions() *Options {
 	return &Options{
-		KeyPrefix:     DefaultKeyPrefix,
+		KeyPrefix:     rediskey.Prefix(rediskey.SegRateLimit),
 		KeyFunc:       defaultKeyFunc,
 		FailOpen:      true,
 		UseRealStatus: true,

@@ -1,7 +1,10 @@
 # Server Configuration
 server:
   env: local # local/dev/test/production，写错会启动失败
-  name: go-github.com/boloc/go-frame-server # 进程标识；当前 bootstrap 不消费，但必须留在本段，多写未知字段会启动失败
+  # 进程标识，必填。同时是本进程所有 Redis key 的最外层命名空间（见 pkg/frame/rediskey），
+  # 所以 admin/api 这类共用同一个 Redis db 的应用必须各写各的值，不能重名。
+  # 建议用短横线短标识，别带点和斜杠。改这个值等于让已有的缓存/幂等/限流 key 全部失效。
+  name: frame-server-api
   port: 10005
   timezone: UTC # 进程默认时区（IANA 时区名，如 Asia/Shanghai），未配置时默认 UTC
   # 部署在 Nginx/负载均衡/CDN 后面时必须填代理网段，否则 c.ClientIP() 全是代理 IP，

@@ -12,6 +12,7 @@ import (
 
 	"github.com/boloc/go-frame-server/pkg/alert"
 	"github.com/boloc/go-frame-server/pkg/frame"
+	"github.com/boloc/go-frame-server/pkg/frame/rediskey"
 	"github.com/boloc/go-frame-server/pkg/logger"
 	gocron "github.com/netresearch/go-cron"
 	"github.com/prometheus/client_golang/prometheus"
@@ -19,14 +20,8 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	// LockKeyPrefix 是 Exclusive 任务分布式锁的 Redis key 前缀。
-	// 完整 key：LockKeyPrefix + scheduler 名 + ":" + 任务名。
-	LockKeyPrefix = "cron:lock:"
-
-	// DefaultLockTTL 是 Task.LockTTL 为 0 时的默认租约。没有自动续租。
-	DefaultLockTTL = 10 * time.Minute
-)
+// DefaultLockTTL 是 Task.LockTTL 为 0 时的默认租约。没有自动续租。
+const DefaultLockTTL = 10 * time.Minute
 
 // releaseLockScript 只删自己持有的锁：value 对得上才 DEL，避免误删后抢到的副本的锁。
 // 走 redis.NewScript.Run：先 EVALSHA，遇到 NOSCRIPT 再退回 EVAL。
@@ -53,8 +48,11 @@ type Task struct {
 
 // TaskInfo 任务的可展示信息，不含 Run。
 type TaskInfo struct {
-	Name     string
-	Schedule string
+	Name      string
+	Schedule  string
+	Exclusive bool
+	// LockKey 是这个任务实际用的分布式锁 key；非 Exclusive 任务不加锁，为空。
+	LockKey string
 }
 
 // Option 配置 cron.Component 的函数式选项。
@@ -121,11 +119,26 @@ func NewComponentWithOptions(name string, opts []Option, tasks ...Task) *Compone
 	return c
 }
 
-// Tasks 返回已注册任务的名称和调度表达式，不暴露 Run。
+// Name 返回这个调度器的名字，也就是 NewComponent 的第一个参数：它既是 Prometheus 指标上
+// 的 scheduler 标签，也是 Exclusive 任务锁 key 的一段。
+func (c *Component) Name() string {
+	return c.name
+}
+
+// LockKey 返回任务名对应的分布式锁 key：命名空间 + rediskey.SegCronLock + 调度器名 +
+// ":" + 任务名。只有 Exclusive 任务会真的用到它；非 Exclusive 任务不加锁。
+func (c *Component) LockKey(taskName string) string {
+	return rediskey.Prefix(rediskey.SegCronLock) + c.name + ":" + taskName
+}
+
+// Tasks 返回已注册任务的名称、调度表达式和加锁信息，不暴露 Run。
 func (c *Component) Tasks() []TaskInfo {
 	infos := make([]TaskInfo, len(c.tasks))
 	for i, t := range c.tasks {
-		infos[i] = TaskInfo{Name: t.Name, Schedule: t.Schedule}
+		infos[i] = TaskInfo{Name: t.Name, Schedule: t.Schedule, Exclusive: t.Exclusive}
+		if t.Exclusive {
+			infos[i].LockKey = c.LockKey(t.Name)
+		}
 	}
 	return infos
 }
@@ -157,6 +170,12 @@ func (c *Component) Start(_ context.Context) error {
 		if task.Exclusive && task.LockTTL < 0 {
 			return fmt.Errorf("cron: 任务 %q 的 LockTTL 不能为负数", task.Name)
 		}
+		// Exclusive 任务的锁 key 依赖 Redis 命名空间。在这里挡住，否则"应用忘了注入"
+		// 会拖到任务第一次触发时才 panic，那已经不是启动期了。
+		if task.Exclusive && !rediskey.IsSet() {
+			return fmt.Errorf("cron: 任务 %q 是 Exclusive，但 Redis 命名空间尚未设置，"+
+				"应用需要在注册组件之前调用 rediskey.SetNamespace", task.Name)
+		}
 		if seen[task.Name] {
 			return fmt.Errorf("cron: 任务名 %q 重复注册", task.Name)
 		}
@@ -174,6 +193,7 @@ func (c *Component) Start(_ context.Context) error {
 	return nil
 }
 
+// wrap 包装任务函数，添加日志、告警、指标采集等功能。
 func (c *Component) wrap(t Task) func(ctx context.Context) {
 	return func(ctx context.Context) {
 		start := time.Now()
@@ -207,8 +227,9 @@ func (c *Component) wrap(t Task) func(ctx context.Context) {
 		status := "success"
 		switch {
 		case err == nil:
-			logger.Info("cron: task finished",
-				zap.String("task", t.Name), zap.Duration("elapsed", elapsed))
+			// 非特殊调试情况下正常执行不打印日志，不然会打印很多日志
+			// logger.Info("cron: task finished",
+			// 	zap.String("task", t.Name), zap.Duration("elapsed", elapsed))
 		case errors.Is(err, context.Canceled):
 			// 进程退出时 Stop 会取消任务 ctx，查库/刷缓存被掐断是正常收尾，不当失败、不告警。
 			status = "canceled"
@@ -226,10 +247,6 @@ func (c *Component) wrap(t Task) func(ctx context.Context) {
 		c.runsTotal.WithLabelValues(t.Name, status).Inc()
 		c.duration.WithLabelValues(t.Name).Observe(elapsed.Seconds())
 	}
-}
-
-func (c *Component) lockKey(taskName string) string {
-	return LockKeyPrefix + c.name + ":" + taskName
 }
 
 func (c *Component) acquireExclusive(ctx context.Context, t Task) (token string, acquired bool) {
@@ -254,14 +271,15 @@ func (c *Component) acquireExclusive(ctx context.Context, t Task) (token string,
 		return "", false
 	}
 
-	claimed, err := client.SetNX(ctx, c.lockKey(t.Name), token, ttl).Result()
+	claimed, err := client.SetNX(ctx, c.LockKey(t.Name), token, ttl).Result()
 	if err != nil {
 		c.lockUnavailable(ctx, t, "SET failed", err)
 		return "", false
 	}
 	if !claimed {
 		logger.Info("cron: exclusive lock not acquired, task skipped",
-			zap.String("task", t.Name), zap.String("scheduler", c.name))
+			zap.String("task", t.Name), zap.String("scheduler", c.name),
+			zap.String("lock_key", c.LockKey(t.Name)))
 		return "", false
 	}
 	return token, true
@@ -280,7 +298,7 @@ func (c *Component) releaseExclusive(ctx context.Context, t Task, token string) 
 
 	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
 	defer cancel()
-	if err := releaseLockScript.Run(releaseCtx, client, []string{c.lockKey(t.Name)}, token).Err(); err != nil {
+	if err := releaseLockScript.Run(releaseCtx, client, []string{c.LockKey(t.Name)}, token).Err(); err != nil {
 		logger.Warn("cron: exclusive lock release failed",
 			zap.String("task", t.Name), zap.Error(err))
 	}

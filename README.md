@@ -163,6 +163,7 @@ rdb    := frame.GetRedisCmdable()           // 通用 Redis 接口，自动适�
 | 限流         | `pkg/frame/ratelimit`                   | Redis + Lua 固定窗口；必须显式 `WithLimit`/`WithWindow`。中间件可挂在组上，计数按路由 `FullPath` × ClientIP，不是整组共用一个桶   | `/api/products` 组（`cmd/example/route/product_route.go`）                                                 |
 | 定时任务       | `pkg/frame/cron`                        | 防并发重入、执行指标、优雅关闭；`Exclusive` 走 Redis 锁                                                           | `cmd/example/cron/cron.go`；`GET /api/cron/tasks`                                                        |
 | 双层刷新只读缓存   | `pkg/frame/refreshcache`                | 数据源 → Redis → 内存；`Get` 内存未就绪才回落 Loader；`Jitter` 错开刷新                                            | `GET /api/products/summary`、详情页公告 `GET /api/products/:id`                                               |
+| Redis key 命名空间 | `pkg/frame/rediskey`                  | 命名空间由应用注入（取 `server.name`），框架不给默认值；四类能力自动拼，业务 key 用 `App` 显式拼                                     | `cmd/example/bootstrap/redis.go`；`GET /test/redis-key`                                                   |
 | 健康检查       | `pkg/frame/healthcheck`                 | `/livez` 存活；`/readyz`（及兼容别名 `/health`）就绪                                                        | `cmd/example/route/route.go`                                                                            |
 | 统一失败通知     | `pkg/alert`                             | 全局单 Hook；`Dropped()` 是打满 64 并发后的丢弃计数                                                            | `cmd/example/main.go` 的 `alert.SetHook`；`GET /test/alert-dropped`                                       |
 | 对象存储       | `pkg/frame/storage`                     | S3 兼容客户端                                                                                        | `/test/storage/*`（`cmd/example/route/storage_route.go`）                                                 |
@@ -232,7 +233,9 @@ DATETIME 裸字符串，`time_zone` 决定服务端 `NOW()` / 列默认值；两
 
 ## 幂等键的作用域
 
-默认 Redis key = `idemp:` + 路由 `FullPath` + `:` + 客户端 `Idempotency-Key`。
+默认 Redis key = `<server.name>:idemp:` + 路由 `FullPath` + `:` + 客户端 `Idempotency-Key`。
+最外层是 `server.name` 注入的命名空间，框架四类 Redis key（幂等、限流、定时任务锁、刷新缓存）
+都从它拼出来，完整组成见 `pkg/frame/rediskey` 的包文档。
 
 - 客户端用全局唯一 UUID，或接口没有用户概念时，**不需要** scope。
 - 键可能跨用户重复（大家都传 `"1"`），或要防止别人猜键重放响应时，用

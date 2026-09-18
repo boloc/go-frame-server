@@ -124,6 +124,8 @@ func (f *Frame) RegisterComponent(component Component) *Frame {
 }
 
 // RegisterSingleton 注册进程内单例组件，key 重复会 panic。
+// @param key 组件的唯一标识，用于在框架内区分不同的组件。
+// @param component 组件实例
 func (f *Frame) RegisterSingleton(key string, component Component) *Frame {
 	f.mu.Lock()
 	defer f.mu.Unlock()

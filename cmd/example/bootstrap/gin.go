@@ -16,8 +16,9 @@ import (
 
 // ServerConfig 对应配置段 server。
 type ServerConfig struct {
-	Env            string        `mapstructure:"env" validate:"required,oneof=local dev test production"`
-	Name           string        `mapstructure:"name"`
+	Env string `mapstructure:"env" validate:"required,oneof=local dev test production"`
+	// Name 是进程标识，同时也是 Redis key 的命名空间。
+	Name           string        `mapstructure:"name" validate:"required"`
 	Port           int           `mapstructure:"port" validate:"required,min=1,max=65535"`
 	Timezone       string        `mapstructure:"timezone"`
 	TrustedProxies []string      `mapstructure:"trusted_proxies"`

@@ -74,8 +74,7 @@ func (l *gormZapLogger) Trace(_ context.Context, begin time.Time, fc func() (sql
 
 	elapsed := time.Since(begin)
 	switch {
-	case err != nil && l.level >= gormlogger.Error && !errors.Is(err, gorm.ErrRecordNotFound):
-		// ErrRecordNotFound 是业务层的正常分支（"查不到"），不是数据库错误，不进 ERROR 日志。
+	case err != nil && l.level >= gormlogger.Error && !ignoredGormTraceErr(err):
 		sql, rows := fc()
 		flog.Error("gorm: sql error", l.fields(sql, rows, elapsed, zap.Error(err))...)
 	case l.slowThreshold > 0 && elapsed > l.slowThreshold && l.level >= gormlogger.Warn:
@@ -85,6 +84,14 @@ func (l *gormZapLogger) Trace(_ context.Context, begin time.Time, fc func() (sql
 		sql, rows := fc()
 		flog.Info("gorm: sql", l.fields(sql, rows, elapsed)...)
 	}
+}
+
+// ignoredGormTraceErr 这些不是数据库故障：查不到是业务分支，ctx 取消/超时是关进程或
+// 请求截止，GORM 把它们包装成 SQL 错误，这里不当 ERROR。
+func ignoredGormTraceErr(err error) bool {
+	return errors.Is(err, gorm.ErrRecordNotFound) ||
+		errors.Is(err, context.Canceled) ||
+		errors.Is(err, context.DeadlineExceeded)
 }
 
 func (l *gormZapLogger) fields(sql string, rows int64, elapsed time.Duration, extra ...zap.Field) []zap.Field {

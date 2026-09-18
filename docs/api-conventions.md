@@ -160,7 +160,9 @@ type ProductItem struct { ... }
 
 ### 5.1 幂等键的作用域
 
-默认 Redis key = `KeyPrefix` + 路由 `FullPath` + `:` + 客户端 `Idempotency-Key`。
+默认 Redis key = `KeyPrefix` + 路由 `FullPath` + `:` + 客户端 `Idempotency-Key`，其中
+`KeyPrefix` 默认是 `rediskey.Prefix(rediskey.SegIdempotency)`。框架四类 Redis key 的完整
+组成都记在 `pkg/frame/rediskey` 的包文档里，那里是唯一出处，见下面第 14 节。
 
 - 客户端用全局唯一 UUID，或接口没有用户概念时，**不需要** `WithScopeFunc`。
 - 键可能跨用户重复（大家都传 `"1"`），或要防止别人猜键重放响应时，用
@@ -189,7 +191,7 @@ type ProductItem struct { ... }
   退避逻辑识别的信号，这些组件普遍认 HTTP 状态码，不会去解析业务响应体里的 `code`。
   如果前端确实只处理 200 + body.code，用 `WithUseRealStatus(false)` 切回 `webx.Fail`。
 
-参考实现：`cmd/example/route/product_route.go` 的 `/api/products` 组。中间件挂在组上，默认 Redis key 是 `ratelimit:` + 路由 `FullPath` + `:` + ClientIP（`pkg/frame/ratelimit` 的 `defaultKeyFunc`），所以 `/list`、`/summary`、`/:id` 各自 10 次/分钟，不是整组共用一个桶。
+参考实现：`cmd/example/route/product_route.go` 的 `/api/products` 组。中间件挂在组上，默认 Redis key 是 `rediskey.Prefix(rediskey.SegRateLimit)` + 路由 `FullPath` + `:` + ClientIP（见 `pkg/frame/ratelimit` 的 `defaultOptions` + `defaultKeyFunc`），所以 `/list`、`/summary`、`/:id` 各自 10 次/分钟，不是整组共用一个桶。
 
 ## 7. 定时任务：任务只负责"业务逻辑"，调度相关的关注点都交给 `pkg/frame/cron`
 
@@ -239,7 +241,7 @@ type ProductItem struct { ... }
 不要给框架加一个"按任务名字反查再触发"的能力，直接在 handler 里调用那个任务背后真正的
 repository/logic 方法——`Task.Run` 本来就是一个独立可调用的方法值/闭包，手动触发和定时
 触发用同一份代码，不会出现两条路径行为不一致的风险。`Component.Tasks()` 只用来给"查看已
-注册任务"这类只读的管理接口用（返回 Name/Schedule，不暴露 `Run`），这类纯接线内省接口
+注册任务"这类只读的管理接口用（返回 Name/Schedule/Exclusive/LockKey，不暴露 `Run`），这类纯接线内省接口
 放在 `cmd/example/cron.TaskListHandler()`；需要调业务逻辑的手动触发接口
 （`internal/example/handler/cron_handler.go` 的 `CronManualReportLowStock`）留在
 `internal/example/handler`，跟其它业务 handler 一致——两者放在不同包，不是疏漏，
@@ -249,7 +251,10 @@ repository/logic 方法——`Task.Run` 本来就是一个独立可调用的方�
 ### 7.1 `Exclusive`：多副本下同一时刻只跑一次
 
 需要「全局只跑一次」的任务设 `Task.Exclusive: true`（示例：`report-low-stock`），
-执行前抢 Redis 锁（`cron:lock:<scheduler>:<task>`，`SET NX PX`）。抢不到记
+执行前抢 Redis 锁（`rediskey.Prefix(rediskey.SegCronLock) + <scheduler> + ":" + <task>`，
+`SET NX PX`）。`<scheduler>` 是 `NewComponent` 的 `name`，`<task>` 是 `Task.Name`；不想靠
+拼字符串反推时用 `Component.LockKey(taskName)`，`Component.Tasks()` 也会直接返回每个
+Exclusive 任务的 `LockKey`。抢不到记
 `status=skipped`，打 Info，不告警。`LockTTL` 必须大于单次最长执行时间，没有自动续租。
 
 Exclusive 任务通常不幂等：Redis 不可用时宁可漏跑一轮（skipped + Warn + alert），
@@ -476,3 +481,46 @@ body**（这种情况很少见，读 body 的需求几乎都应该走 `reqctx.Fr
 
 健康检查必须用 Try：`healthcheck.MySQLChecker(frame.TryDefaultDB)` 这类探测在依赖
 还没起来或已经摘掉时不能把自己 panic 掉。
+
+## 14. Redis key：命名空间由应用注入，框架不给默认值
+
+**规则：**
+
+- 框架写 Redis 的能力有四类——幂等、限流、Exclusive 定时任务锁、双层刷新缓存。它们的 key
+  一律按 `命名空间 + 能力段 + 实例标识` 三段拼，段定义和完整组成只记在 `pkg/frame/rediskey`
+  的包文档里，那里是唯一出处。**不要在业务代码里自己拼 key 字符串，也不要在别处重复记一份
+  格式说明**——这种说明一定会和代码漂移（改这版之前 `cmd/example/cron/cron.go` 的注释里就
+  还写着早已改掉的调度器名）。
+- **命名空间必须由应用在装配阶段用 `rediskey.SetNamespace` 注入一次，框架故意不提供默认
+  值。** admin / api 这类多个应用共用同一个 Redis db 时，一个写死的默认值会让它们的键空间
+  悄悄重叠：同名路由的限流会共用一个桶、同名缓存会互相覆盖，而这类问题只在线上暴露。没注入
+  就让它启动不了，比给个"看起来能跑"的默认值安全。
+- 命名空间取 `server.name`（参考实现：`cmd/example/bootstrap/redis.go`），所以
+  `server.name` 是必填项，多个应用之间不能重名。换句话说，隔离粒度是"应用"而不是"二进制"：
+  两个进程如果**故意**要共用缓存或限流桶，就该配同一个 `server.name`。
+- `SetNamespace` 只能调用一次，重复调用或传空值直接 panic。要给单个挂载点换前缀用各自的
+  `WithKeyPrefix`，不要试图改全局命名空间。
+
+**为什么能在包级变量之后才注入：**
+
+四类 key 全是懒拼的——幂等和限流在 `Middleware()` 里取前缀，而路由注册发生在
+`GinComponent.Start` 内部；任务锁和缓存 key 在真正读写 Redis 时才拼。这三个时机都晚于配置
+加载，所以即便 `cmd/example/cron.Component` 和 `internal/example/cache` 里的实例是包级变量
+（构造早于配置），在 `bootstrap.Setup` 里注入一次就能全局生效，不需要把它们改成在 bootstrap
+里构造。
+
+**忘了注入会怎样：**
+
+不会退化成静默共用 key，各能力都在启动期挡住——`refreshcache.Cache.Start` 和
+`cron.Component.Start`（有 Exclusive 任务时）返回启动错误，`idempotency.Middleware` /
+`ratelimit.Middleware` 在路由注册时 panic，和它们对 `WithLimit` 缺失的处理一致。
+
+**业务自己读写的 key 不在上面四类里，框架不碰它。** `frame.GetRedisCmdable().Set(ctx, "foo", ...)`
+落到 Redis 上就是 `foo`，一个字符都不会加。所以业务 key 默认是全共享的：同一个 Redis db 下
+两个应用用了同名 key 就是同一份数据，没人挡。要和其它应用隔开，在调用处显式用
+`rediskey.App(segments...)` 拼（`Namespace()` + 各段用冒号连接）。演示接口
+`GET /test/redis-key`：`rediskey.App` 拼 key 后 `SET` 进 Redis，响应里带回真实 key。
+
+**查真实 key：** `cron.Component.LockKey(taskName)` 返回某个任务的锁 key，
+`Component.Tasks()` 会直接带上每个 Exclusive 任务的 `LockKey`（`GET /api/cron/tasks` 能看到）；
+`refreshcache.Cache.RedisKey()` 返回缓存值实际落在哪个 key 上。不要靠拼字符串反推。

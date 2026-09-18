@@ -33,5 +33,6 @@ func registerCapabilityRoutes(r *gin.Engine) {
 		testGroup.GET("/maps", handler.CapabilityMaps)
 		testGroup.GET("/logger", handler.CapabilityLogger)
 		testGroup.GET("/alert-dropped", handler.CapabilityAlertDropped)
+		testGroup.GET("/redis-key", handler.CapabilityRedisKey)
 	}
 }

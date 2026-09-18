@@ -1,6 +1,6 @@
 {
   "info": {
-    "description": "cmd/example 的 HTTP 接口文档。导入本文件即可（导入 → OpenAPI/Swagger）。\n\n不使用 components / $ref / 数据模型，请求和响应按真实返回字段写成示例。\n\n约定：\n- 业务接口默认 HTTP 200，成功看 `code=0`，失败看 body 的 `code` / `message` / `fields`\n- 只有明确调用 `webx.FailWithStatus` 的接口才会返回非 200（限流 429、超限 413、真实 HTTP 404）\n- 端口以配置 `server.port` 为准，`config/frame-server.yml.example` 是 `10005`\n- 需要 `X-Demo-Token`（任意非空值，例如 `x`）的路径：`/test/**`、`POST /api/orders`\n- `POST /api/orders` 还必须带 `Idempotency-Key`；`X-Demo-Token` 同时是幂等 scope（同用户同键重放，换用户不冲突）\n- `/api/products` 组挂限流中间件：每个路由 FullPath × ClientIP 各 10 次/分钟（不是整组一个桶），超限 HTTP 429 + `Retry-After`\n- `/livez` 接 liveness；`/readyz`（及 `/health`）接 readiness。`log_db` 非关键，单独挂了不让整体变 503\n- panic 恢复返回 HTTP 500、空 body，不是 webx 格式\n",
+    "description": "cmd/example 的 HTTP 接口文档。导入本文件即可（导入 → OpenAPI/Swagger）。\n\n不使用 components / $ref / 数据模型，请求和响应按真实返回字段写成示例。\n\n约定：\n- 业务接口默认 HTTP 200，成功看 `code=0`，失败看 body 的 `code` / `message` / `fields`\n- 只有明确调用 `webx.FailWithStatus` 的接口才会返回非 200（限流 429、超限 413、真实 HTTP 404）\n- 端口以配置 `server.port` 为准（本仓库 yml 是 `10006`，yml.example 是 `10005`）\n- 需要 `X-Demo-Token`（任意非空值，例如 `x`）的路径：`/test/**`、`POST /api/orders`\n- `POST /api/orders` 还必须带 `Idempotency-Key`；`X-Demo-Token` 同时是幂等 scope（同用户同键重放，换用户不冲突）\n- `/api/products` 组挂限流中间件：每个路由 FullPath × ClientIP 各 10 次/分钟（不是整组一个桶），超限 HTTP 429 + `Retry-After`\n- `/livez` 接 liveness；`/readyz`（及 `/health`）接 readiness。`log_db` 非关键，单独挂了不让整体变 503\n- panic 恢复返回 HTTP 500、空 body，不是 webx 格式\n",
     "title": "go-frame-server example",
     "version": "1.0.0"
   },
@@ -36,7 +36,7 @@
     },
     "/api/cron/tasks": {
       "get": {
-        "description": "TaskInfo 没有 json tag，字段名是 Name / Schedule，不含 Exclusive/LockTTL。report-low-stock 在代码里是 Exclusive=true（Redis 锁），列表接口不暴露这个字段。",
+        "description": "TaskInfo 没有 json tag，字段名是 Name / Schedule / Exclusive / LockKey，不含 LockTTL 和 Run。LockKey 是这个任务实际用的分布式锁 key，最外层是 server.name 注入的命名空间（组成见 pkg/frame/rediskey）；非 Exclusive 任务不加锁，返回空字符串。",
         "responses": {
           "200": {
             "content": {
@@ -45,14 +45,20 @@
                   "code": 0,
                   "data": [
                     {
+                      "Exclusive": false,
+                      "LockKey": "",
                       "Name": "heartbeat",
                       "Schedule": "@every 30s"
                     },
                     {
+                      "Exclusive": false,
+                      "LockKey": "",
                       "Name": "minute-marker",
                       "Schedule": "0 * * * * *"
                     },
                     {
+                      "Exclusive": true,
+                      "LockKey": "frame-example:cron:lock:crontab-tasks:report-low-stock",
                       "Name": "report-low-stock",
                       "Schedule": "0 */5 * * * *"
                     }
@@ -102,11 +108,33 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "type": "object",
+                "required": [
+                  "product_id",
+                  "quantity"
+                ],
+                "properties": {
+                  "product_id": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "产品 ID。1 有货；2 售罄 10002；3 不存在 40400；4 已下架 40000；999 模拟库故障 50001。"
+                  },
+                  "quantity": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 99,
+                    "description": "购买数量，1–99。"
+                  }
+                }
               },
-              "example": {
-                "product_id": 1,
-                "quantity": 2
+              "examples": {
+                "default": {
+                  "summary": "请求示例",
+                  "value": {
+                    "product_id": 1,
+                    "quantity": 2
+                  }
+                }
               }
             }
           },
@@ -455,11 +483,29 @@
         "requestBody": {
           "content": {
             "application/json": {
-              "example": {
-                "status": 0
-              },
               "schema": {
-                "type": "object"
+                "type": "object",
+                "required": [
+                  "status"
+                ],
+                "properties": {
+                  "status": {
+                    "type": "integer",
+                    "enum": [
+                      0,
+                      1
+                    ],
+                    "description": "0=下架，1=上架。其它值 code=40000。"
+                  }
+                }
+              },
+              "examples": {
+                "default": {
+                  "summary": "请求示例",
+                  "value": {
+                    "status": 0
+                  }
+                }
               }
             }
           },
@@ -557,11 +603,26 @@
         "requestBody": {
           "content": {
             "application/json": {
-              "example": {
-                "value": "今日全场包邮"
-              },
               "schema": {
-                "type": "object"
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "string",
+                    "maxLength": 1000,
+                    "description": "配置内容，字段名是 value。"
+                  }
+                }
+              },
+              "examples": {
+                "default": {
+                  "summary": "写入公告",
+                  "value": {
+                    "value": "今日全场包邮"
+                  }
+                }
               }
             }
           },
@@ -840,7 +901,7 @@
     },
     "/test/body-limit": {
       "post": {
-        "description": "回显已被 ContextMiddleware 读入的 body 长度。超过 GinComponent 默认 4MB 时进不了 handler，HTTP 413 / code=41300（FailWithStatus）。",
+        "description": "回显已被 ContextMiddleware 读入的 body 长度。请求体是**纯文本**（Apifox 选「文本 / raw」，不要选 JSON），示例就是 `hello`。超过 GinComponent 默认 4MB 时进不了 handler，HTTP 413 / code=41300（FailWithStatus）。",
         "parameters": [
           {
             "example": "x",
@@ -859,7 +920,12 @@
               "schema": {
                 "type": "string"
               },
-              "example": "hello"
+              "examples": {
+                "default": {
+                  "summary": "请求示例",
+                  "value": "hello"
+                }
+              }
             }
           }
         },
@@ -958,10 +1024,22 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "maxLength": 64,
+                    "description": "可选。不传时服务端用 demo-event。"
+                  }
+                }
               },
-              "example": {
-                "name": "demo"
+              "examples": {
+                "default": {
+                  "summary": "请求示例",
+                  "value": {
+                    "name": "demo"
+                  }
+                }
               }
             }
           }
@@ -1476,6 +1554,48 @@
         ]
       }
     },
+    "/test/redis-key": {
+      "get": {
+        "description": "用 rediskey.App 拼 key 后 SET 进 Redis（TTL 5 分钟），响应带回真实 key。命名空间取 server.name。",
+        "parameters": [
+          {
+            "example": "x",
+            "in": "header",
+            "name": "X-Demo-Token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 0,
+                  "data": {
+                    "namespace": "frame-example:",
+                    "key": "frame-example:product:123:stock",
+                    "value": "demo",
+                    "ttl": "5m"
+                  },
+                  "message": "success"
+                },
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "统一响应"
+          }
+        },
+        "summary": "Redis key 拼法",
+        "tags": [
+          "能力演示"
+        ]
+      }
+    },
     "/test/reqctx": {
       "get": {
         "description": "展示 reqctx.FromGin 的 RequestID / ClientIP / RequestBody / CustomData。RequestID 不是幂等键。",
@@ -1531,7 +1651,7 @@
         ]
       },
       "post": {
-        "description": "POST 时 data.request_body 回显原文。",
+        "description": "POST 时 data.request_body 回显原文。\n请求体是纯文本（选「文本 / raw」），示例 `payload`，不要包成 JSON 对象。",
         "parameters": [
           {
             "example": "x",
@@ -1550,7 +1670,12 @@
               "schema": {
                 "type": "string"
               },
-              "example": "payload"
+              "examples": {
+                "default": {
+                  "summary": "请求示例",
+                  "value": "payload"
+                }
+              }
             }
           }
         },
@@ -2004,11 +2129,31 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "type": "object",
+                "required": [
+                  "password",
+                  "confirm"
+                ],
+                "properties": {
+                  "password": {
+                    "type": "string",
+                    "minLength": 6,
+                    "description": "至少 6 位。"
+                  },
+                  "confirm": {
+                    "type": "string",
+                    "description": "须与 password 相同，否则 code=40000。"
+                  }
+                }
               },
-              "example": {
-                "password": "secret",
-                "confirm": "secret"
+              "examples": {
+                "default": {
+                  "summary": "请求示例",
+                  "value": {
+                    "password": "secret",
+                    "confirm": "secret"
+                  }
+                }
               }
             }
           }
@@ -2139,8 +2284,12 @@
   },
   "servers": [
     {
-      "description": "本地 example（端口以 server.port 为准，yml.example 默认 10005）",
-      "url": "http://127.0.0.1:10005"
+      "url": "http://127.0.0.1:10006",
+      "description": "本仓库 config/frame-server.yml 的 server.port"
+    },
+    {
+      "url": "http://127.0.0.1:10005",
+      "description": "frame-server.yml.example 默认端口"
     }
   ],
   "tags": [

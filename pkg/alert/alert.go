@@ -11,11 +11,11 @@ import (
 
 // Event 一次失败通知。字段可能为空，Hook 应对空值宽容。
 type Event struct {
-	Scope   string
-	Name    string
-	Message string
-	Err     error
-	Fields  map[string]any
+	Scope   string         // 报警范围，例如 "lifecycle"、"business"、"system"
+	Name    string         // 报警名称，例如 "service_down"、"database_error"、"cache_miss"
+	Message string         // 报警消息，例如 "服务下线"、"数据库错误"、"缓存丢失"
+	Err     error          // 报警错误，例如 "service_down"、"database_error"、"cache_miss"
+	Fields  map[string]any // 报警字段，例如 "service_name"、"database_name"、"cache_name"
 }
 
 type Hook func(ctx context.Context, e Event)

@@ -1,7 +1,7 @@
 package constant
 
-// 系统配置 key，读和写都应引用同一常量。
+// config_db.system_config 表里的 key，读和写都引用这里。
 const (
-	// ConfigKeyProductNotice 产品详情页的全局公告文案。
+	// ConfigKeyProductNotice 公告正文存在这张表的这一行。
 	ConfigKeyProductNotice = "product.notice"
 )

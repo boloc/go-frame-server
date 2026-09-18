@@ -5,6 +5,8 @@ import (
 
 	"github.com/boloc/go-frame-server/pkg/alert"
 	"github.com/boloc/go-frame-server/pkg/errs"
+	"github.com/boloc/go-frame-server/pkg/frame"
+	"github.com/boloc/go-frame-server/pkg/frame/rediskey"
 	"github.com/boloc/go-frame-server/pkg/frame/reqctx"
 	"github.com/boloc/go-frame-server/pkg/frame/webx"
 	"github.com/boloc/go-frame-server/pkg/logger"
@@ -213,5 +215,23 @@ func CapabilityAlertDropped(c *gin.Context) {
 		"dropped":       alert.Dropped(),
 		"max_in_flight": alert.MaxInFlight,
 		"hint":          "Dropped 是 Hook 并发打满 MaxInFlight 后丢弃的累计数。本进程 Hook 见 cmd/example/main.go 的 alert.SetHook。",
+	})
+}
+
+// CapabilityRedisKey 用 rediskey.App 拼 key，然后 SET 进 Redis，方便在客户端里对照。
+//
+//	GET /test/redis-key
+//	curl -H "X-Demo-Token: x" localhost:10006/test/redis-key
+func CapabilityRedisKey(c *gin.Context) {
+	key := rediskey.App("product", "123", "stock")
+	if err := frame.GetRedisCmdable().Set(c.Request.Context(), key, "demo", 5*time.Minute).Err(); err != nil {
+		webx.Fail(c, errs.Database(err))
+		return
+	}
+	webx.Success(c, gin.H{
+		"namespace": rediskey.Namespace(),
+		"key":       key,
+		"value":     "demo",
+		"ttl":       "5m",
 	})
 }

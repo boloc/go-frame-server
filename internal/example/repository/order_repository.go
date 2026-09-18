@@ -86,7 +86,7 @@ func (r *OrderRepository) ReportLowStock(ctx context.Context) error {
 	defer r.mu.Unlock()
 
 	for productID, stock := range r.stock {
-		if stock < lowStockThreshold {
+		if stock < lowStockThreshold { // 库存低于阈值打警告日志
 			logger.Warn("order: low stock detected",
 				zap.Uint("product_id", productID), zap.Int("stock", stock))
 		}

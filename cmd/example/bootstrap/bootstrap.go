@@ -34,11 +34,11 @@ func Setup(f *frame.Frame, conf *config.ConfigComponent) {
 	SetupClickHouse(f, conf)
 
 	// 初始化定时任务调度器，随 Frame 生命周期启动/关闭；由 cron.enabled 控制（默认启用）。
-	SetupCron(f, conf)
+	// SetupCron(f, conf)
 
-	// 初始化这个应用的所有双层刷新只读缓存实例；具体有哪几个缓存是 refreshcache.go
-	// 内部的细节，见 SetupCaches 的文档注释。
-	SetupCaches(f)
+	// 初始化这个应用的所有双层刷新只读缓存实例；具体有哪几个缓存由 internal/example/cache
+	// 自己登记，见 SetupCaches 的文档注释。
+	// SetupCaches(f)
 
 	// 初始化指标采集：进程级指标 + 每个命名 MySQL/Redis 各自一份连接池采集器。
 	metricsHandlers := SetupMonitor(f, conf, map[string]*components.MySQLComponent{

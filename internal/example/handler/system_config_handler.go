@@ -3,7 +3,6 @@ package handler
 import (
 	"github.com/boloc/go-frame-server/internal/example/dto"
 	"github.com/boloc/go-frame-server/internal/example/repository"
-	"github.com/boloc/go-frame-server/pkg/errs"
 	"github.com/boloc/go-frame-server/pkg/frame/webx"
 	"github.com/gin-gonic/gin"
 )
@@ -13,18 +12,18 @@ import (
 //	GET /api/system-configs/:key
 //	curl localhost:10006/api/system-configs/product.notice
 func SystemConfigGetByKey(c *gin.Context) {
-	key := c.Param("key")
-	if key == "" {
-		webx.Fail(c, errs.InvalidParams("key 不能为空"))
+	var uri dto.SystemConfigKeyURI
+	if err := webx.BindURI(c, &uri); err != nil {
+		webx.Fail(c, err)
 		return
 	}
 
-	value, err := repository.NewSystemConfigRepository().GetValue(c.Request.Context(), key)
+	value, err := repository.NewSystemConfigRepository().GetValue(c.Request.Context(), uri.Key)
 	if err != nil {
 		webx.Fail(c, err)
 		return
 	}
-	webx.Success(c, gin.H{"key": key, "value": value})
+	webx.Success(c, gin.H{"key": uri.Key, "value": value})
 }
 
 // SystemConfigSet 写入一条系统配置（写 config_db 主库；存在则更新）。
@@ -33,9 +32,9 @@ func SystemConfigGetByKey(c *gin.Context) {
 //	curl -X POST -H "Content-Type: application/json" -d '{"value":"hello"}' \
 //	  localhost:10006/api/system-configs/product.notice
 func SystemConfigSet(c *gin.Context) {
-	key := c.Param("key")
-	if key == "" {
-		webx.Fail(c, errs.InvalidParams("key 不能为空"))
+	var uri dto.SystemConfigKeyURI
+	if err := webx.BindURI(c, &uri); err != nil {
+		webx.Fail(c, err)
 		return
 	}
 
@@ -45,7 +44,7 @@ func SystemConfigSet(c *gin.Context) {
 		return
 	}
 
-	if err := repository.NewSystemConfigRepository().SetValue(c.Request.Context(), key, req.Value); err != nil {
+	if err := repository.NewSystemConfigRepository().SetValue(c.Request.Context(), uri.Key, req.Value); err != nil {
 		webx.Fail(c, err)
 		return
 	}

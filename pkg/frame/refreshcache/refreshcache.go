@@ -13,6 +13,7 @@ import (
 	"github.com/boloc/go-frame-server/pkg/alert"
 	"github.com/boloc/go-frame-server/pkg/frame"
 	"github.com/boloc/go-frame-server/pkg/frame/cron"
+	"github.com/boloc/go-frame-server/pkg/frame/rediskey"
 	"github.com/boloc/go-frame-server/pkg/logger"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/redis/go-redis/v9"
@@ -25,15 +26,22 @@ type Loader[T any] func(ctx context.Context) (T, error)
 
 // Options 缓存配置。Key/Loader/RedisInterval/MemoryInterval 必须显式设置。
 type Options[T any] struct {
-	Key            string
-	Loader         Loader[T]
-	RedisInterval  time.Duration
+	// Key 是这个缓存实例在进程内的标识：内部 cron.Component 的 name、两条刷新任务的
+	// 名字后缀、singleflight 的合并键和日志字段都用它。它不是 Redis key 本身，
+	// 写进 Redis 时前面会加上命名空间和缓存段，见 Cache.RedisKey。
+	Key string
+	// Loader 从数据源加载最新数据。
+	Loader Loader[T]
+	// RedisInterval 刷新间隔。
+	RedisInterval time.Duration
+	// MemoryInterval 内存刷新间隔。
 	MemoryInterval time.Duration
 	// RedisTTL 必须明显大于 RedisInterval，默认 RedisInterval * 5。
 	RedisTTL time.Duration
-	// Jitter 刷新前的随机抖动上限，多实例部署时用来错开刷新时机。
+	// Jitter 刷新前的随机抖动上限，多实例部署时用来错开刷新时机。默认 0，不抖动。
 	Jitter time.Duration
-	Redis  func() (redis.Cmdable, bool)
+	// Redis 获取 Redis 客户端。
+	Redis func() (redis.Cmdable, bool)
 }
 
 // Cache 双层刷新只读缓存，实现 frame.Component（Start(ctx)/Stop(ctx)）。
@@ -60,11 +68,13 @@ func New[T any](opts Options[T]) *Cache[T] {
 	}
 	c := &Cache[T]{opts: opts}
 	c.cron = cron.NewComponent(opts.Key,
+		// 从数据源刷新到 Redis
 		cron.Task{
 			Name:     "cache-refresh-source-to-redis:" + opts.Key,
 			Schedule: everySchedule(opts.RedisInterval),
 			Run:      c.refreshSourceToRedis,
 		},
+		// 从 Redis 刷新到内存
 		cron.Task{
 			Name:     "cache-refresh-redis-to-memory:" + opts.Key,
 			Schedule: everySchedule(opts.MemoryInterval),
@@ -72,6 +82,11 @@ func New[T any](opts Options[T]) *Cache[T] {
 		},
 	)
 	return c
+}
+
+// RedisKey 返回缓存值实际落在 Redis 上的 key：命名空间 + rediskey.SegCache + Options.Key。
+func (c *Cache[T]) RedisKey() string {
+	return rediskey.Prefix(rediskey.SegCache) + c.opts.Key
 }
 
 // Get 优先读内存；内存为空时同步调用 Loader，不写回缓存。ok 为 false 表示两边都拿不到。
@@ -110,6 +125,12 @@ func (c *Cache[T]) Start(ctx context.Context) error {
 	if c.opts.MemoryInterval <= 0 {
 		return errors.New("refreshcache: Options.MemoryInterval 必须大于 0")
 	}
+	// 预热和刷新都要拼 Redis key。在这里挡住，避免"应用忘了注入命名空间"变成
+	// warmUp 里的运行期 panic。
+	if !rediskey.IsSet() {
+		return errors.New("refreshcache: Redis 命名空间尚未设置，" +
+			"应用需要在注册组件之前调用 rediskey.SetNamespace")
+	}
 	if c.opts.RedisTTL <= 0 {
 		c.opts.RedisTTL = c.opts.RedisInterval * 5
 	}
@@ -130,7 +151,7 @@ func (c *Cache[T]) Collectors() []prometheus.Collector {
 
 func (c *Cache[T]) warmUp(ctx context.Context) {
 	if client, ok := c.opts.Redis(); ok {
-		if raw, err := client.Get(ctx, c.opts.Key).Result(); err == nil {
+		if raw, err := client.Get(ctx, c.RedisKey()).Result(); err == nil {
 			var v T
 			if err := json.Unmarshal([]byte(raw), &v); err == nil {
 				c.value.Store(&v)
@@ -150,7 +171,9 @@ func (c *Cache[T]) warmUp(ctx context.Context) {
 }
 
 func (c *Cache[T]) refreshSourceToRedis(ctx context.Context) error {
-	c.applyJitter(ctx)
+	if err := c.applyJitter(ctx); err != nil {
+		return err
+	}
 
 	v, err := c.opts.Loader(ctx)
 	if err != nil {
@@ -161,10 +184,12 @@ func (c *Cache[T]) refreshSourceToRedis(ctx context.Context) error {
 }
 
 func (c *Cache[T]) refreshRedisToMemory(ctx context.Context) error {
-	c.applyJitter(ctx)
+	if err := c.applyJitter(ctx); err != nil {
+		return err
+	}
 
 	if client, ok := c.opts.Redis(); ok {
-		if raw, err := client.Get(ctx, c.opts.Key).Result(); err == nil {
+		if raw, err := client.Get(ctx, c.RedisKey()).Result(); err == nil {
 			var v T
 			if err := json.Unmarshal([]byte(raw), &v); err == nil {
 				c.value.Store(&v)
@@ -192,19 +217,25 @@ func (c *Cache[T]) writeToRedis(ctx context.Context, v T) {
 		alert.Notify(ctx, alert.Event{Scope: "cache", Name: c.opts.Key, Message: "marshal failed", Err: err})
 		return
 	}
-	if err := client.Set(ctx, c.opts.Key, string(payload), c.opts.RedisTTL).Err(); err != nil {
-		logger.Warn("cache: write to redis failed", zap.String("key", c.opts.Key), zap.Error(err))
+	if err := client.Set(ctx, c.RedisKey(), string(payload), c.opts.RedisTTL).Err(); err != nil {
+		logger.Warn("cache: write to redis failed",
+			zap.String("key", c.opts.Key), zap.String("redis_key", c.RedisKey()), zap.Error(err))
 	}
 }
 
-func (c *Cache[T]) applyJitter(ctx context.Context) {
+func (c *Cache[T]) applyJitter(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if c.opts.Jitter <= 0 {
-		return
+		return nil
 	}
 	d := time.Duration(rand.Int63n(int64(c.opts.Jitter)))
 	select {
 	case <-time.After(d):
+		return ctx.Err()
 	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 

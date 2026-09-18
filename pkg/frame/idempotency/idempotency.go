@@ -10,6 +10,7 @@ import (
 	"github.com/boloc/go-frame-server/pkg/alert"
 	"github.com/boloc/go-frame-server/pkg/errs"
 	"github.com/boloc/go-frame-server/pkg/frame"
+	"github.com/boloc/go-frame-server/pkg/frame/rediskey"
 	"github.com/boloc/go-frame-server/pkg/frame/webx"
 	"github.com/boloc/go-frame-server/pkg/logger"
 	"github.com/gin-gonic/gin"
@@ -18,7 +19,6 @@ import (
 )
 
 const DefaultHeader = "Idempotency-Key"
-const DefaultKeyPrefix = "idemp:"
 const DefaultTTL = 24 * time.Hour
 
 const processingMarker = "\x00processing"
@@ -67,10 +67,12 @@ func WithScopeFunc(fn func(c *gin.Context) string) Option {
 
 func WithRedis(fn func() (redis.Cmdable, bool)) Option { return func(o *Options) { o.Redis = fn } }
 
+// defaultOptions 在 Middleware 里调用，也就是路由注册阶段（GinComponent.Start 内），
+// 此时配置已经加载、rediskey 命名空间已经注入，所以可以直接取前缀。
 func defaultOptions() *Options {
 	return &Options{
 		Header:    DefaultHeader,
-		KeyPrefix: DefaultKeyPrefix,
+		KeyPrefix: rediskey.Prefix(rediskey.SegIdempotency),
 		TTL:       DefaultTTL,
 		Required:  false,
 		FailOpen:  true,

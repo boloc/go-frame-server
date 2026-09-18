@@ -6,11 +6,23 @@ import (
 	"github.com/boloc/go-frame-server/pkg/frame"
 	"github.com/boloc/go-frame-server/pkg/frame/components"
 	"github.com/boloc/go-frame-server/pkg/frame/config"
+	"github.com/boloc/go-frame-server/pkg/frame/rediskey"
 )
 
-// 三种模式只注册一个。业务侧一律 frame.GetRedisCmdable / TryGetRedisCmdable。
-// 连接池未配时框架默认 PoolSize=32 / MinIdleConns=4；route_randomly 保持 false，
-// 避免幂等/限流/Exclusive 锁读到从节点滞后数据。
+/*
+	三种模式只注册一个。业务侧一律 frame.GetRedisCmdable / TryGetRedisCmdable。
+	连接池未配时框架默认 PoolSize=32 / MinIdleConns=4；route_randomly 保持 false，
+	避免幂等/限流/Exclusive 锁读到从节点滞后数据。
+*/
+
+// setupRedisNamespace 把 server.name 加到本进程所有 Redis key 前面。
+// 例如 name=frame-example 时，缓存 key 会写成 frame-example:cache:...，
+// 这样和别的应用写到同一个 Redis 里的 key 能分开。
+func setupRedisNamespace(conf *config.ConfigComponent) {
+	var cfg ServerConfig
+	conf.MustStrictUnmarshalKey("server", &cfg)
+	rediskey.SetNamespace(cfg.Name)
+}
 
 // RedisSingleConfig 对应配置段 redis.single。
 type RedisSingleConfig struct {
@@ -58,6 +70,8 @@ type RedisSentinelConfig struct {
 // SetupRedis 初始化Redis单机组件，返回创建的组件实例方便调用方（如 SetupMonitor）
 // 挂上连接池指标采集器。
 func SetupRedis(f *frame.Frame, conf *config.ConfigComponent) *components.RedisComponent {
+	setupRedisNamespace(conf)
+
 	var cfg RedisSingleConfig
 	conf.MustStrictUnmarshalKey("redis.single", &cfg)
 
@@ -78,6 +92,8 @@ func SetupRedis(f *frame.Frame, conf *config.ConfigComponent) *components.RedisC
 
 // SetupRedisCluster 初始化 Redis 集群组件，返回值给 SetupMonitor 挂连接池指标。
 func SetupRedisCluster(f *frame.Frame, conf *config.ConfigComponent) *components.RedisClusterComponent {
+	setupRedisNamespace(conf)
+
 	var cfg RedisClusterConfig
 	conf.MustStrictUnmarshalKey("redis.cluster", &cfg)
 
@@ -100,6 +116,8 @@ func SetupRedisCluster(f *frame.Frame, conf *config.ConfigComponent) *components
 
 // SetupRedisSentinel 初始化 Redis 哨兵组件，返回值给 SetupMonitor 挂连接池指标。
 func SetupRedisSentinel(f *frame.Frame, conf *config.ConfigComponent) *components.RedisSentinelComponent {
+	setupRedisNamespace(conf)
+
 	var cfg RedisSentinelConfig
 	conf.MustStrictUnmarshalKey("redis.sentinel", &cfg)
 
