@@ -9,7 +9,9 @@ import (
 // time.Now()、日志时间戳等没有显式指定时区的代码。跟 MySQL 连接的时区无关——见
 // util.BuildMysqlDSN，那边固定默认 UTC，不跟随这里的设置。
 func SetupTimezone(conf *config.ConfigComponent) {
-	if err := util.SetProcessTimezone(conf.GetString("server.timezone")); err != nil {
+	var cfg ServerConfig
+	conf.MustStrictUnmarshalKey("server", &cfg)
+	if err := util.SetProcessTimezone(cfg.Timezone); err != nil {
 		panic("bootstrap: " + err.Error())
 	}
 }

@@ -134,17 +134,22 @@ func WithRedisConnectRetryInterval(interval time.Duration) RedisOption {
 
 // NewRedisComponent 创建单机 Redis 组件。
 // 不做主从发现或读写分离；需要故障转移请用 Sentinel，或让 Addr 指向 VIP/代理。
+//
+// Start 会把 go-redis 内部日志接到 pkg/logger（Warn，字段 component=redis）。
+// 单机/集群/哨兵三个组件共用 setRedisLoggerOnce，进程内只调用 redis.SetLogger 一次。
 func NewRedisComponent(opts ...RedisOption) *RedisComponent {
 	r := &RedisComponent{
 		config: &redis.Options{
-			Addr:         "localhost:6379", // 地址
-			DB:           0,                // 数据库
-			PoolSize:     10,               // 连接池大小
-			MinIdleConns: 10,               // 最小空闲连接数
-			ReadTimeout:  5 * time.Second,  // 读取超时时间
-			WriteTimeout: 5 * time.Second,  // 写入超时时间
-			MaxRetries:   3,                // 最大重试次数
-			PoolTimeout:  5 * time.Second,  // 连接池超时时间
+			Addr: "localhost:6379", // 地址
+			DB:   0,                // 数据库
+			// PoolSize=32 / MinIdleConns=4：150 QPS 量级、PoolTimeout 5s 下 10 条连接容易排队；
+			// MinIdleConns 不应等于 PoolSize，否则永远维持满池且没有突发余量。
+			PoolSize:     32,
+			MinIdleConns: 4,
+			ReadTimeout:  5 * time.Second, // 读取超时时间
+			WriteTimeout: 5 * time.Second, // 写入超时时间
+			MaxRetries:   3,               // 最大重试次数
+			PoolTimeout:  5 * time.Second, // 连接池超时时间
 		},
 		connectRetryAttempts: 3,
 		connectRetryInterval: 2 * time.Second,
@@ -157,6 +162,7 @@ func NewRedisComponent(opts ...RedisOption) *RedisComponent {
 
 // Start 启动 Redis 组件：Ping 成功后发布为全局实例。初次连接失败会按 connectRetry 重试。
 func (r *RedisComponent) Start(ctx context.Context) error {
+	setRedisLoggerOnce()
 	var client *redis.Client
 	err := retryConnect(ctx, r.connectRetryAttempts, r.connectRetryInterval, func() error {
 		c := redis.NewClient(r.config)

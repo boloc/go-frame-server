@@ -15,37 +15,56 @@ import (
 // 这一组函数演示框架的响应/错误能力，路由挂在 /test 下，不对应真实业务。
 
 // CapabilitySuccess 演示最基本的成功响应。
-// GET /test/success
+//
+//	GET /test/success
+//	curl -H "X-Demo-Token: x" localhost:10006/test/success
+//	# 预期 HTTP 200，{"code":0,"message":"success","data":{"hello":"world"}}
 func CapabilitySuccess(c *gin.Context) {
 	webx.Success(c, gin.H{"hello": "world"})
 }
 
 // CapabilityNotFound 演示 webx.Fail：HTTP 200，业务码 40400 放在 body.code。
-// GET /test/not-found
+// local/dev 下 main.go 会打开 webx.IncludeCallerInResponse，失败响应多一个 caller 字段。
+//
+//	GET /test/not-found
+//	curl -H "X-Demo-Token: x" localhost:10006/test/not-found
+//	# 预期 HTTP 200，code=40400；进程里会打一条 webx: on_fail（webx.SetOnFail）
 func CapabilityNotFound(c *gin.Context) {
 	webx.Fail(c, errs.NotFound("演示用：这个资源不存在"))
 }
 
 // CapabilityNotFoundWithRealStatus 演示 webx.FailWithStatus：响应为真实 HTTP 404。
-// GET /test/not-found-with-status
+//
+//	GET /test/not-found-with-status
+//	curl -s -o /dev/null -w "%{http_code}\n" -H "X-Demo-Token: x" localhost:10006/test/not-found-with-status
+//	# 预期 HTTP 404，body.code 仍是 40400
 func CapabilityNotFoundWithRealStatus(c *gin.Context) {
 	webx.FailWithStatus(c, errs.NotFound("演示用：这个资源不存在"))
 }
 
 // CapabilityUnauthorized 演示框架内置错误码 CodeUnauthorized。
-// GET /test/unauthorized
+//
+//	GET /test/unauthorized
+//	curl -H "X-Demo-Token: x" localhost:10006/test/unauthorized
+//	# 预期 HTTP 200，code=40100
 func CapabilityUnauthorized(c *gin.Context) {
 	webx.Fail(c, errs.Unauthorized(""))
 }
 
 // CapabilityDatabaseError 演示 errs.Database：对外统一文案，原始错误只进日志。
-// GET /test/database-error
+//
+//	GET /test/database-error
+//	curl -H "X-Demo-Token: x" localhost:10006/test/database-error
+//	# 预期 HTTP 200，code=50001；原始 dial 错误不会出现在响应体
 func CapabilityDatabaseError(c *gin.Context) {
 	webx.Fail(c, errs.Database(errors.New("dial tcp 127.0.0.1:3306: connect: connection refused")))
 }
 
-// CapabilityBusinessError 演示业务自定义错误码 CodeOrderAlreadyPaid（已登记默认文案和 409）。
-// GET /test/business-error
+// CapabilityBusinessError 演示业务自定义错误码：bizerr 里 RegisterHTTPStatus + RegisterMessage。
+//
+//	GET /test/business-error
+//	curl -H "X-Demo-Token: x" localhost:10006/test/business-error
+//	# 预期 HTTP 200，code=10001，message=订单已支付，请勿重复支付
 func CapabilityBusinessError(c *gin.Context) {
 	webx.Fail(c, errs.New(bizerr.CodeOrderAlreadyPaid, ""))
 }
@@ -57,7 +76,11 @@ type validationDemoReq struct {
 
 // CapabilityValidationError 演示字段格式校验失败：不传 id 或传 id=0 都会触发
 // validate:"required"，响应体的 fields 字段会带上具体是哪个字段、为什么不满足。
-// GET /test/validation-error
+// 跨字段规则见 POST /test/validatable（Validatable）和 POST /api/orders（validation 层）。
+//
+//	GET /test/validation-error
+//	curl -H "X-Demo-Token: x" localhost:10006/test/validation-error
+//	# 预期 code=40000，fields.id 有说明
 func CapabilityValidationError(c *gin.Context) {
 	var req validationDemoReq
 	if err := webx.BindQuery(c, &req); err != nil {
@@ -68,13 +91,19 @@ func CapabilityValidationError(c *gin.Context) {
 }
 
 // CapabilityPanic 演示 panic 会被 gin.Recovery 兜住，进程不退出，响应是默认 500。
-// GET /test/panic
+//
+//	GET /test/panic
+//	curl -s -o /dev/null -w "%{http_code}\n" -H "X-Demo-Token: x" localhost:10006/test/panic
+//	# 预期 HTTP 500，进程继续活着
 func CapabilityPanic(c *gin.Context) {
 	panic("演示用：故意触发一次 panic")
 }
 
 // CapabilityErrorSource 演示 errs.Error.Caller 指向真正调用 errs 包的那一行。
-// GET /test/error-source
+//
+//	GET /test/error-source
+//	curl -H "X-Demo-Token: x" localhost:10006/test/error-source
+//	# 预期 data.caller 指向本文件 simulateQueryFailure 那一行
 func CapabilityErrorSource(c *gin.Context) {
 	err := simulateRepositoryFailure()
 	e := errs.From(err)
@@ -102,13 +131,18 @@ const timeLayoutWithZone = time.DateTime + " -0700 MST"
 // 展示 server.timezone（项目时区）跟这个连接的 loc（默认 UTC，见 util.BuildMysqlDSN）
 // 分别对同一个瞬间的解读——不写入任何表，用 SELECT ? 让 MySQL 把参数原样回显，避免
 // 污染业务数据。
-// GET /test/timezone
+//
+//	GET /test/timezone
+//	curl -H "X-Demo-Token: x" localhost:10006/test/timezone
+//	# 预期 mysql_round_trip_display 与 go_time_now 同一秒（忽略毫秒）
 func CapabilityTimezone(c *gin.Context) {
 	ctx := c.Request.Context()
 	now := time.Now()
 
+	// 裸的 SELECT ? 会把参数按 VARCHAR 回显，驱动的 parseTime 只对 DATE/DATETIME 列生效，
+	// 所以要 CAST 成 DATETIME(3) 才能 Scan 进 time.Time（真实业务里读的是表列，不会遇到这个问题）。
 	var roundTrip time.Time
-	if err := frame.DefaultDB().WithContext(ctx).Raw("SELECT ?", now).Scan(&roundTrip).Error; err != nil {
+	if err := frame.DefaultDB().WithContext(ctx).Raw("SELECT CAST(? AS DATETIME(3))", now).Scan(&roundTrip).Error; err != nil {
 		webx.Fail(c, errs.Database(err))
 		return
 	}

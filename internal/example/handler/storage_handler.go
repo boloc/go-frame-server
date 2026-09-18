@@ -19,7 +19,9 @@ func storageUnavailable() error {
 }
 
 // StorageUpload 上传一个文件。
-// POST /test/storage/upload  multipart/form-data: file
+//
+//	POST /test/storage/upload  multipart/form-data: file
+//	curl -H "X-Demo-Token: x" -F "file=@/path/to/local.jpg" localhost:10006/test/storage/upload
 func StorageUpload(c *gin.Context) {
 	client, ok := storage.TryDefault()
 	if !ok {
@@ -42,7 +44,9 @@ func StorageUpload(c *gin.Context) {
 }
 
 // StorageList 按前缀列出对象键。
-// GET /test/storage/objects?prefix=&max_keys=
+//
+//	GET /test/storage/objects?prefix=&max_keys=
+//	curl -H "X-Demo-Token: x" "localhost:10006/test/storage/objects?prefix=uploads/"
 func StorageList(c *gin.Context) {
 	client, ok := storage.TryDefault()
 	if !ok {
@@ -65,7 +69,9 @@ func StorageList(c *gin.Context) {
 }
 
 // StorageDelete 删除一个对象。
-// DELETE /test/storage/objects?key=...
+//
+//	DELETE /test/storage/objects?key=...
+//	curl -H "X-Demo-Token: x" -X DELETE "localhost:10006/test/storage/objects?key=uploads/xxx.jpg"
 func StorageDelete(c *gin.Context) {
 	client, ok := storage.TryDefault()
 	if !ok {
@@ -87,7 +93,9 @@ func StorageDelete(c *gin.Context) {
 }
 
 // StoragePresignedURL 生成一个限时访问的预签名 URL。
-// GET /test/storage/presigned-url?key=&expires_seconds=
+//
+//	GET /test/storage/presigned-url?key=&expires_seconds=
+//	curl -H "X-Demo-Token: x" "localhost:10006/test/storage/presigned-url?key=uploads/xxx.jpg"
 func StoragePresignedURL(c *gin.Context) {
 	client, ok := storage.TryDefault()
 	if !ok {

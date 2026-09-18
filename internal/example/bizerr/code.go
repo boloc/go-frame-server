@@ -15,6 +15,7 @@ const (
 )
 
 // init 登记默认文案和 HTTP 状态码，包被导入时自动执行。
+// RegisterMessage 配合 errs.New(code, "") 使用；RegisterHTTPStatus 给 FailWithStatus 用。
 func init() {
 	errs.RegisterHTTPStatus(CodeOrderAlreadyPaid, http.StatusConflict)
 	errs.RegisterMessage(CodeOrderAlreadyPaid, "订单已支付，请勿重复支付")

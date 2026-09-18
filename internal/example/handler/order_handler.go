@@ -9,6 +9,7 @@ import (
 )
 
 // OrderCreate 演示完整下单分层：绑定 -> 校验 -> logic -> repository，失败统一走 webx.Fail。
+// DTO 只有 validate tag；跨字段规则在 validation.ValidateOrderCreate（显式调用，不是 Validatable）。
 //
 //	POST /api/orders  { "product_id": 1, "quantity": 2 }   -> 下单成功
 //	POST /api/orders  { "product_id": 1, "quantity": 0 }   -> 字段格式校验失败

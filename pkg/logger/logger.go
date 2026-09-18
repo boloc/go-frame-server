@@ -72,10 +72,28 @@ func LevelToString(l zapcore.Level) string {
 	}
 }
 
+// ParseLevel 把配置里的级别字符串（debug/info/warn/error，不区分大小写）解析成 zapcore.Level；
+// 空字符串按 info 处理，其它不认识的值返回 error。
+func ParseLevel(s string) (zapcore.Level, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", LevelToString(InfoLevel):
+		return zapcore.InfoLevel, nil
+	case LevelToString(DebugLevel):
+		return zapcore.DebugLevel, nil
+	case LevelToString(WarnLevel):
+		return zapcore.WarnLevel, nil
+	case LevelToString(ErrorLevel):
+		return zapcore.ErrorLevel, nil
+	default:
+		return zapcore.InfoLevel, fmt.Errorf("logger: 不支持的日志级别 %q，只接受 debug/info/warn/error", s)
+	}
+}
+
 // LoggerConfig 日志配置
 type LoggerConfig struct {
 	Level      string // debug, info, warn, error
 	IsStdout   bool   // 是否输出到控制台
+	StdoutJSON bool   // 控制台是否输出 JSON（容器环境由采集器收 stdout 时应开启；默认 false 为带颜色的可读格式）
 	IsFile     bool   // 是否输出到文件
 	Filename   string // 日志文件名
 	MaxSize    int    // MB
@@ -91,16 +109,19 @@ func WithLoggerLevel(level string) LoggerOption {
 	}
 }
 
-// WithLoggerFilename 设置日志文件名
+// WithLoggerFilename 设置日志文件路径。
+// 只给文件名（如 "app.log"）时落到 ./logs/ 下；带目录的相对/绝对路径（如
+// "/var/log/app/app.log"）原样使用，不再做任何拼接。
 func WithLoggerFilename(filename string) LoggerOption {
 	// 如果文件名没有设置，则使用默认值
 	if filename == "" {
 		filename = DefaultFilename
 	}
 
-	// 如果文件名中没有包含logs目录，则自动添加
-	if !strings.Contains(filename, "logs") {
-		filename = "./logs/" + filename
+	// 裸文件名（不带任何目录）才补 ./logs/ 前缀。之前用 strings.Contains(filename, "logs")
+	// 判断，会把 "/var/log/app/app.log" 这类不含 "logs" 的绝对路径拼成 "./logs//var/log/..."。
+	if filepath.Dir(filename) == "." {
+		filename = filepath.Join("logs", filename)
 	}
 
 	return func(l *LoggerComponent) {
@@ -143,6 +164,14 @@ func WithLoggerStdout(isStdout bool) LoggerOption {
 	}
 }
 
+// WithLoggerStdoutJSON 控制台输出改为 JSON（无颜色码）。生产环境靠采集器收 stdout 时应开启，
+// 否则 ANSI 颜色码会混进日志系统；本地开发保持默认 false 更易读。
+func WithLoggerStdoutJSON(enabled bool) LoggerOption {
+	return func(l *LoggerComponent) {
+		l.config.StdoutJSON = enabled
+	}
+}
+
 // WithLoggerIsFile 设置是否输出到文件
 func WithLoggerIsFile(isFile bool) LoggerOption {
 	return func(l *LoggerComponent) {
@@ -179,19 +208,11 @@ func (l *LoggerComponent) Start(ctx context.Context) error {
 		return nil
 	}
 
-	// 设置日志级别
-	var level zapcore.Level
-	switch l.config.Level {
-	case LevelToString(DebugLevel):
-		level = zapcore.DebugLevel
-	case LevelToString(InfoLevel):
-		level = zapcore.InfoLevel
-	case LevelToString(WarnLevel):
-		level = zapcore.WarnLevel
-	case LevelToString(ErrorLevel):
-		level = zapcore.ErrorLevel
-	default:
-		level = zapcore.InfoLevel
+	// 设置日志级别。不认识的值直接让启动失败，而不是静默落到 info：
+	// 配置写错（比如 "production"）应该在启动时暴露，不该等到线上发现日志级别不对。
+	level, err := ParseLevel(l.config.Level)
+	if err != nil {
+		return err
 	}
 
 	// 配置通用编码器设置
@@ -244,16 +265,19 @@ func (l *LoggerComponent) Start(ctx context.Context) error {
 
 	// 控制台输出
 	if l.config.IsStdout {
-		// 控制台输出的编码器配置 - 使用彩色输出
-		consoleEncoderConfig := encoderConfig
-		consoleEncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
+		var consoleEncoder zapcore.Encoder
+		if l.config.StdoutJSON {
+			jsonEncoderConfig := encoderConfig
+			jsonEncoderConfig.EncodeLevel = zapcore.LowercaseLevelEncoder
+			consoleEncoder = zapcore.NewJSONEncoder(jsonEncoderConfig)
+		} else {
+			// 控制台输出的编码器配置 - 使用彩色输出，本地开发更易读
+			consoleEncoderConfig := encoderConfig
+			consoleEncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
+			consoleEncoder = zapcore.NewConsoleEncoder(consoleEncoderConfig)
+		}
 
-		// 控制台使用更易读的格式
-		consoleCore := zapcore.NewCore(
-			zapcore.NewConsoleEncoder(consoleEncoderConfig),
-			zapcore.AddSync(os.Stdout),
-			level,
-		)
+		consoleCore := zapcore.NewCore(consoleEncoder, zapcore.AddSync(os.Stdout), level)
 		cores = append(cores, consoleCore)
 	}
 

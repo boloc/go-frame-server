@@ -4,6 +4,7 @@ package errs
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"runtime"
 	"strings"
@@ -92,9 +93,7 @@ func RegisterHTTPStatus(c Code, status int) {
 
 	old := *httpStatusMap.Load()
 	next := make(map[Code]int, len(old)+1)
-	for k, v := range old {
-		next[k] = v
-	}
+	maps.Copy(next, old)
 	next[c] = status
 	httpStatusMap.Store(&next)
 }
@@ -106,9 +105,7 @@ func RegisterMessage(c Code, message string) {
 
 	old := *defaultMessageMap.Load()
 	next := make(map[Code]string, len(old)+1)
-	for k, v := range old {
-		next[k] = v
-	}
+	maps.Copy(next, old)
 	next[c] = message
 	defaultMessageMap.Store(&next)
 }
@@ -235,7 +232,7 @@ func Is(err error, code Code) bool {
 //
 // 对 typed-nil *Error（`var e *Error; return e` 这种 e 从未被赋值、但作为 error 接口
 // 返回的畸形值，err == nil 判断不出来）故意不当成"没有错误"处理，而是仍然兜底包成
-// CodeInternal 返回——见 errs_test.go 的 TestFromHandlesTypedNilWithoutPanicking：
+// CodeInternal 返回：
 // 这是故意选择"让这类 bug 大声地表现成一个 500"，而不是悄悄当成成功放过去，
 // 避免真正的 bug（该赋值的分支忘了赋值）被这里的"宽容"掩盖掉。
 func From(err error) *Error {

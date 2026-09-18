@@ -18,13 +18,16 @@ import (
 
 const DefaultKeyPrefix = "ratelimit:"
 
-const fixedWindowScript = `
+// fixedWindowScript 用 redis.NewScript 包装：Run 先走 EVALSHA（只发 40 字节的 sha），
+// 遇到 NOSCRIPT 再退回 EVAL 把脚本体发过去并缓存。直接每次 EVAL 会让每个请求都把整段
+// 脚本发给 Redis 重新解析，白花带宽和 Redis CPU。
+var fixedWindowScript = redis.NewScript(`
 local current = redis.call("INCR", KEYS[1])
 if current == 1 then
 	redis.call("EXPIRE", KEYS[1], ARGV[1])
 end
 return current
-`
+`)
 
 // Options 限流配置。Limit/Window 必须显式设置。
 type Options struct {
@@ -100,16 +103,13 @@ func Middleware(opts ...Option) gin.HandlerFunc {
 		}
 
 		key := o.KeyPrefix + o.KeyFunc(c)
-		count, err := client.Eval(c.Request.Context(), fixedWindowScript, []string{key}, windowSeconds).Int64()
+		count, err := fixedWindowScript.Run(c.Request.Context(), client, []string{key}, windowSeconds).Int64()
 		if err != nil {
 			degrade(c, o, "EVAL failed", err)
 			return
 		}
 
-		remaining := o.Limit - count
-		if remaining < 0 {
-			remaining = 0
-		}
+		remaining := max(o.Limit-count, 0)
 		c.Header("X-RateLimit-Limit", strconv.FormatInt(o.Limit, 10))
 		c.Header("X-RateLimit-Remaining", strconv.FormatInt(remaining, 10))
 

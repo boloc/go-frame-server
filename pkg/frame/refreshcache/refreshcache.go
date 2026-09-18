@@ -5,6 +5,7 @@ package refreshcache
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"math/rand"
 	"sync/atomic"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
+	"golang.org/x/sync/singleflight"
 )
 
 // Loader 从数据源加载最新数据。
@@ -40,9 +42,14 @@ type Cache[T any] struct {
 	cron *cron.Component
 
 	value atomic.Pointer[T]
+
+	// sf 合并 Get() 在内存未就绪时的并发 Loader 调用，避免这个短暂窗口内的多个并发
+	// 请求各自触发一次 Loader，在数据源本身脆弱时把"缓存还没预热好"变成一次雪崩。
+	// 零值可直接用，不需要初始化。
+	sf singleflight.Group
 }
 
-// New 创建双层刷新只读缓存。必填项未设置时 Start 会 panic。
+// New 创建双层刷新只读缓存。必填项未设置时 Start 返回 error，New 本身不检查、不 panic。
 //
 // 内部的 *cron.Component 在构造时就创建好，不等到 Start，这样 Collectors() 在 Start
 // 之前调用也能拿到真正的指标对象（用 opts.Key 当 cron.Component 的 name，见
@@ -68,23 +75,40 @@ func New[T any](opts Options[T]) *Cache[T] {
 }
 
 // Get 优先读内存；内存为空时同步调用 Loader，不写回缓存。ok 为 false 表示两边都拿不到。
+//
+// 内存为空的这个窗口用 singleflight 按 opts.Key 合并并发调用：同一时刻只有一个 goroutine
+// 真正执行 Loader，其它并发的 Get 调用等它返回后共享同一个结果，不会各自打一次数据源。
+// Loader 用 context.WithoutCancel(ctx) 而不是直接传调用方的 ctx：如果某个请求的 ctx 先被
+// 取消（客户端断开连接），不应该连带取消正在为其它并发请求服务的这一次 Loader 调用。
 func (c *Cache[T]) Get(ctx context.Context) (T, bool) {
 	if v := c.value.Load(); v != nil {
 		return *v, true
 	}
 
-	v, err := c.opts.Loader(ctx)
+	loaderCtx := context.WithoutCancel(ctx)
+	v, err, _ := c.sf.Do(c.opts.Key, func() (any, error) {
+		return c.opts.Loader(loaderCtx)
+	})
 	if err != nil {
 		var zero T
 		return zero, false
 	}
-	return v, true
+	return v.(T), true
 }
 
 // Start 校验配置、同步预热，然后启动两条刷新任务。
 func (c *Cache[T]) Start(ctx context.Context) error {
-	if c.opts.Key == "" || c.opts.Loader == nil || c.opts.RedisInterval <= 0 || c.opts.MemoryInterval <= 0 {
-		panic("cache: Key/Loader/RedisInterval/MemoryInterval 都必须显式设置为非零值")
+	if c.opts.Key == "" {
+		return errors.New("refreshcache: Options.Key 必须非空")
+	}
+	if c.opts.Loader == nil {
+		return errors.New("refreshcache: Options.Loader 必须非空")
+	}
+	if c.opts.RedisInterval <= 0 {
+		return errors.New("refreshcache: Options.RedisInterval 必须大于 0")
+	}
+	if c.opts.MemoryInterval <= 0 {
+		return errors.New("refreshcache: Options.MemoryInterval 必须大于 0")
 	}
 	if c.opts.RedisTTL <= 0 {
 		c.opts.RedisTTL = c.opts.RedisInterval * 5

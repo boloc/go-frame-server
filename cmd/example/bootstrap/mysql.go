@@ -1,6 +1,9 @@
 package bootstrap
 
 import (
+	"fmt"
+	"time"
+
 	"github.com/boloc/go-frame-server/internal/example/constant"
 	"github.com/boloc/go-frame-server/pkg/frame"
 	"github.com/boloc/go-frame-server/pkg/frame/components"
@@ -8,40 +11,40 @@ import (
 	"github.com/boloc/go-frame-server/pkg/util"
 )
 
-// DatabaseConfig 数据库配置结构体（mapstructure 将配置解析为结构体）。
+// DatabaseConfig 对应配置段 database.<name>。
+// database.auto_migrate 与各实例并列，不会进入本结构体。
 type DatabaseConfig struct {
-	Master          util.MySQLDSNConfig   `mapstructure:"master"`            // 主库配置
-	Slaves          []util.MySQLDSNConfig `mapstructure:"slaves"`            // 从库配置
-	MaxIdleConns    int                   `mapstructure:"max_idle_conns"`    // 设置空闲连接池中的最大连接数
-	MaxOpenConns    int                   `mapstructure:"max_open_conns"`    // 设置打开数据库连接的最大数量
-	ConnMaxLifetime string                `mapstructure:"conn_max_lifetime"` // 设置连接可复用的最大时间 (类型为: time.Duration)
-	ConnMaxIdleTime string                `mapstructure:"conn_max_idle_time"` // 空闲超过该时间后从池中剔除，应明显小于 MySQL wait_timeout
-	Prefix          string                `mapstructure:"prefix"`            // 设置表前缀
+	Master          util.MySQLDSNConfig   `mapstructure:"master" validate:"required"`
+	Slaves          []util.MySQLDSNConfig `mapstructure:"slaves"`
+	MaxIdleConns    int                   `mapstructure:"max_idle_conns" validate:"min=1"`
+	MaxOpenConns    int                   `mapstructure:"max_open_conns" validate:"min=1"`
+	ConnMaxLifetime time.Duration         `mapstructure:"conn_max_lifetime"`
+	ConnMaxIdleTime time.Duration         `mapstructure:"conn_max_idle_time"`
+	Prefix          string                `mapstructure:"prefix"`
 }
 
 // buildMySQLComponent 从 database.<name> 解析配置并创建组件（不注册、不启动）。
 func buildMySQLComponent(conf *config.ConfigComponent, name string, isDefault bool) *components.MySQLComponent {
 	var dbConfig DatabaseConfig
-	if err := conf.GetViper().UnmarshalKey("database."+name, &dbConfig); err != nil {
-		panic("failed to parse database." + name + " config: " + err.Error())
-	}
+	conf.MustStrictUnmarshalKey("database."+name, &dbConfig)
 
-	masterDSN := util.BuildMysqlDSN(dbConfig.Master)
+	// DSN 拼装失败（缺 host/name/user、非法 loc/timeout）直接让启动失败。
+	masterDSN, err := util.BuildMysqlDSN(dbConfig.Master)
+	if err != nil {
+		panic("database." + name + ".master: " + err.Error())
+	}
 
 	var slavesDSN []string
-	for _, slave := range dbConfig.Slaves {
-		slavesDSN = append(slavesDSN, util.BuildMysqlDSN(slave))
+	for i, slave := range dbConfig.Slaves {
+		dsn, err := util.BuildMysqlDSN(slave)
+		if err != nil {
+			panic(fmt.Sprintf("database.%s.slaves[%d]: %v", name, i, err))
+		}
+		slavesDSN = append(slavesDSN, dsn)
 	}
 
-	// 时间字段解析失败在启动时直接报错，避免静默落到默认值。
-	connMaxLifetime, err := config.ParseDuration(dbConfig.ConnMaxLifetime)
-	if err != nil {
-		panic("failed to parse database." + name + ".conn_max_lifetime: " + err.Error())
-	}
-	connMaxIdleTime, err := config.ParseDuration(dbConfig.ConnMaxIdleTime)
-	if err != nil {
-		panic("failed to parse database." + name + ".conn_max_idle_time: " + err.Error())
-	}
+	var serverCfg ServerConfig
+	conf.MustStrictUnmarshalKey("server", &serverCfg)
 
 	return components.NewMySQLComponent(
 		name,
@@ -50,10 +53,10 @@ func buildMySQLComponent(conf *config.ConfigComponent, name string, isDefault bo
 			SlavesDSN:       slavesDSN,
 			MaxIdleConns:    dbConfig.MaxIdleConns,
 			MaxOpenConns:    dbConfig.MaxOpenConns,
-			ConnMaxLifetime: connMaxLifetime,
-			ConnMaxIdleTime: connMaxIdleTime,
+			ConnMaxLifetime: dbConfig.ConnMaxLifetime,
+			ConnMaxIdleTime: dbConfig.ConnMaxIdleTime,
 			Prefix:          dbConfig.Prefix,
-			LogLevel:        components.GormLogLevelForEnv(conf.GetString("server.env")),
+			LogLevel:        components.GormLogLevelForEnv(serverCfg.Env),
 		},
 		isDefault,
 	)

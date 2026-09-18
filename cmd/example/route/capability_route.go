@@ -7,7 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// registerCapabilityRoutes 演示框架响应/错误能力，挂在 /test 下，并给该组加演示 token 中间件。
+// registerCapabilityRoutes 演示框架响应/错误/中间件/校验等能力，挂在 /test 下。
 //
 //	curl localhost:10006/test/success                              # 401，缺 token
 //	curl -H "X-Demo-Token: x" localhost:10006/test/success          # 200
@@ -22,8 +22,16 @@ func registerCapabilityRoutes(r *gin.Engine) {
 		testGroup.GET("/database-error", handler.CapabilityDatabaseError)
 		testGroup.GET("/business-error", handler.CapabilityBusinessError)
 		testGroup.GET("/validation-error", handler.CapabilityValidationError)
+		testGroup.POST("/validatable", handler.CapabilityValidatable)
 		testGroup.GET("/panic", handler.CapabilityPanic)
 		testGroup.GET("/error-source", handler.CapabilityErrorSource)
 		testGroup.GET("/timezone", handler.CapabilityTimezone)
+		testGroup.POST("/body-limit", handler.CapabilityBodyLimit)
+		testGroup.GET("/slow", handler.CapabilitySlow)
+		testGroup.GET("/reqctx", handler.CapabilityReqctx)
+		testGroup.POST("/reqctx", handler.CapabilityReqctx)
+		testGroup.GET("/maps", handler.CapabilityMaps)
+		testGroup.GET("/logger", handler.CapabilityLogger)
+		testGroup.GET("/alert-dropped", handler.CapabilityAlertDropped)
 	}
 }

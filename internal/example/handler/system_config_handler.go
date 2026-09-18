@@ -9,7 +9,9 @@ import (
 )
 
 // SystemConfigGetByKey 按 key 查询一条系统配置（读 config_db 从库）。
-// GET /api/system-configs/:key
+//
+//	GET /api/system-configs/:key
+//	curl localhost:10006/api/system-configs/product.notice
 func SystemConfigGetByKey(c *gin.Context) {
 	key := c.Param("key")
 	if key == "" {
@@ -26,7 +28,10 @@ func SystemConfigGetByKey(c *gin.Context) {
 }
 
 // SystemConfigSet 写入一条系统配置（写 config_db 主库；存在则更新）。
-// POST /api/system-configs/:key  { "value": "xxx" }
+//
+//	POST /api/system-configs/:key  { "value": "xxx" }
+//	curl -X POST -H "Content-Type: application/json" -d '{"value":"hello"}' \
+//	  localhost:10006/api/system-configs/product.notice
 func SystemConfigSet(c *gin.Context) {
 	key := c.Param("key")
 	if key == "" {

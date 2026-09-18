@@ -9,9 +9,9 @@ import (
 
 // SetProcessTimezone 把整个进程的默认时区（time.Local）设置为 name；name 为空时用 UTC。
 //
-// 之后任何没有显式指定时区的代码——time.Now()、日志时间戳、MySQL DSN 里 loc 留空时的
-// 默认值（见 BuildMysqlDSN）——都会落到同一个时区。必须在建立数据库连接等依赖
-// time.Local 的代码之前调用一次。
+// 之后任何没有显式指定时区的代码——time.Now()、日志时间戳、time.Time.Format——都会落到
+// 这个时区。注意 MySQL 连接的时区跟它无关：BuildMysqlDSN 里 loc 留空固定是 UTC，不跟随
+// time.Local（存储层的时区约定不应随业务展示时区变化）。应在 bootstrap 最开始调用一次。
 func SetProcessTimezone(name string) error {
 	if name == "" {
 		name = "UTC"

@@ -31,13 +31,18 @@ type ClickHouseGORMConfig struct {
 	MaxOpenConns    int             // 最大打开连接数
 	ConnMaxLifetime time.Duration   // 连接最大生命周期
 	ConnMaxIdleTime time.Duration   // 空闲超过该时间后从池中剔除
-	LogLevel        logger.LogLevel // 日志级别
+	LogLevel        logger.LogLevel // 日志级别，SQL 日志经 pkg/logger 落地，见 newGormLogger
+	SlowThreshold   time.Duration   // 慢查询阈值，默认 200ms
 	Prefix          string          // 表前缀
 
 	// ConnectRetryAttempts 启动时连接失败的重试次数（含第一次尝试），默认 3。
 	ConnectRetryAttempts int
 	// ConnectRetryInterval 每次重试之间的等待时间，默认 2s。
 	ConnectRetryInterval time.Duration
+
+	// SkipDefaultTransaction 语义和默认值与 MySQLConfig 同名字段一致：默认 true，关闭
+	// GORM 对单条写操作的隐式事务，避免每条语句多付一次 BEGIN/COMMIT 往返。
+	SkipDefaultTransaction *bool
 }
 
 // applyDefaults 设置默认值
@@ -57,11 +62,18 @@ func (c *ClickHouseGORMConfig) applyDefaults() {
 	if c.LogLevel == 0 {
 		c.LogLevel = logger.Warn
 	}
+	if c.SlowThreshold == 0 {
+		c.SlowThreshold = defaultSlowThreshold
+	}
 	if c.ConnectRetryAttempts == 0 {
 		c.ConnectRetryAttempts = 3
 	}
 	if c.ConnectRetryInterval == 0 {
 		c.ConnectRetryInterval = 2 * time.Second
+	}
+	if c.SkipDefaultTransaction == nil {
+		skip := true
+		c.SkipDefaultTransaction = &skip
 	}
 }
 
@@ -158,7 +170,8 @@ func (c *ClickHouseGORMComponent) connect(ctx context.Context) (*gorm.DB, error)
 	}
 
 	gormConfig := &gorm.Config{
-		Logger: logger.Default.LogMode(c.config.LogLevel),
+		Logger:                 newGormLogger("clickhouse", c.config.LogLevel, c.config.SlowThreshold),
+		SkipDefaultTransaction: c.config.SkipDefaultTransaction == nil || *c.config.SkipDefaultTransaction,
 	}
 	if c.config.Prefix != "" {
 		gormConfig.NamingStrategy = schema.NamingStrategy{
@@ -202,7 +215,7 @@ func (c *ClickHouseGORMComponent) DB() *gorm.DB {
 
 // ==================== 默认实例访问方法 ====================
 //
-// panic 版访问器适合启动阶段；运行时请用对应的 Try 版本。
+// panic 版访问器适合启动阶段；健康检查/可选依赖请用对应的 Try 版本。
 
 // TryDefaultClickHouseDB 获取默认 ClickHouse GORM 实例的连接；未注册时返回 (nil, false)，不 panic。
 func TryDefaultClickHouseDB() (*gorm.DB, bool) {
@@ -213,10 +226,11 @@ func TryDefaultClickHouseDB() (*gorm.DB, bool) {
 	if instance == nil {
 		return nil, false
 	}
-	return instance.DB(), true
+	db := instance.DB()
+	return db, db != nil
 }
 
-// DefaultClickHouseDB 获取默认 ClickHouse GORM DB；未注册时 panic。运行时请用 TryDefaultClickHouseDB。
+// DefaultClickHouseDB 获取默认 ClickHouse GORM DB；未注册时 panic。健康检查/可选依赖请用 TryDefaultClickHouseDB。
 func DefaultClickHouseDB() *gorm.DB {
 	db, ok := TryDefaultClickHouseDB()
 	if !ok {
@@ -241,10 +255,11 @@ func TryClickHouseDB(name string) (*gorm.DB, bool) {
 	if !ok {
 		return nil, false
 	}
-	return instance.DB(), true
+	db := instance.DB()
+	return db, db != nil
 }
 
-// ClickHouseDB 获取指定名称的 ClickHouse GORM DB；不存在时 panic。运行时请用 TryClickHouseDB。
+// ClickHouseDB 获取指定名称的 ClickHouse GORM DB；不存在时 panic。健康检查/可选依赖请用 TryClickHouseDB。
 func ClickHouseDB(name string) *gorm.DB {
 	db, ok := TryClickHouseDB(name)
 	if !ok {
@@ -253,7 +268,7 @@ func ClickHouseDB(name string) *gorm.DB {
 	return db
 }
 
-// GetClickHouseGORMComponent 获取指定名称的 ClickHouse GORM 组件；不存在时 panic。运行时请用 TryGetClickHouseGORMComponent。
+// GetClickHouseGORMComponent 获取指定名称的 ClickHouse GORM 组件；不存在时 panic。健康检查/可选依赖请用 TryGetClickHouseGORMComponent。
 func GetClickHouseGORMComponent(name string) *ClickHouseGORMComponent {
 	instance, ok := TryGetClickHouseGORMComponent(name)
 	if !ok {

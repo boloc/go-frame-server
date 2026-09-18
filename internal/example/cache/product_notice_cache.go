@@ -11,6 +11,7 @@ import (
 )
 
 // ProductNotice 缓存产品详情页的全局公告文案（读 config_db）：60s 刷 Redis，10s 刷内存。
+// Get / Jitter 语义与 ProductActiveCount 相同：内存未就绪才同步回落 Loader；Jitter 错开多实例刷新。
 var ProductNotice = refreshcache.New(refreshcache.Options[string]{
 	Key: "example:product:notice",
 	Loader: func(ctx context.Context) (string, error) {

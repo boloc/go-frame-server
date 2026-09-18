@@ -10,6 +10,10 @@ import (
 )
 
 // ProductActiveCount 缓存当前上架产品数量：30s 刷 Redis，5s 刷内存。
+//
+// Get 优先读内存。warmUp 失败、内存从未成功加载过时，Get 会同步调一次 Loader（singleflight
+// 合并并发），但不写回缓存——等定时刷新成功后才进内存。两边都拿不到时 ok=false。
+// Jitter 给刷新加随机抖动，避免多实例在同一调度边界一起打数据源/Redis。
 // 使用前需在 bootstrap 里注册，handler 直接 Get 即可。
 var ProductActiveCount = refreshcache.New(refreshcache.Options[int64]{
 	Key: "example:product:active_count",

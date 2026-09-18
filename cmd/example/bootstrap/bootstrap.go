@@ -26,8 +26,8 @@ func Setup(f *frame.Frame, conf *config.ConfigComponent) {
 
 	// 初始化 Redis：单机 / 集群 / 哨兵三选一，只留一行生效。
 	// 当前走单机（读 redis.single）。换模式时改成下面注释里的调用。
-	// redisComponent := SetupRedis(f, conf)
-	redisComponent := SetupRedisCluster(f, conf) // 集群，读 redis.cluster
+	redisComponent := SetupRedis(f, conf) // 单机，读 redis.single
+	// redisComponent := SetupRedisCluster(f, conf) // 集群，读 redis.cluster
 	// redisComponent := SetupRedisSentinel(f, conf) // 哨兵，读 redis.sentinel
 
 	// 初始化 ClickHouse，由 clickhouse.enabled 控制（默认启用）。

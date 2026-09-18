@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"slices"
 	"sync"
 	"syscall"
 	"time"
@@ -31,7 +32,9 @@ type Hook func(ctx context.Context) error
 type FrameConfig struct {
 	// ShutdownTimeout 优雅关闭超时。超时后仍会带着已取消的 ctx 继续 Stop 剩余组件。
 	ShutdownTimeout time.Duration
-	// EnableRestartSignal 是否响应 SIGHUP 热重启（重启组件但不退出进程），默认开启。
+	// EnableRestartSignal 是否响应 SIGHUP 热重启（重启组件但不退出进程），默认关闭。
+	// SIGHUP 不会重读配置，重启期间 HTTP 端口会短暂关闭，多副本部署应走滚动重启；
+	// 单机需要时再显式 WithRestartSignal(true)。
 	EnableRestartSignal bool
 }
 
@@ -45,7 +48,7 @@ func WithShutdownTimeout(timeout time.Duration) Option {
 	}
 }
 
-// WithRestartSignal 控制是否响应 SIGHUP 触发热重启（见 Frame.Restart）。
+// WithRestartSignal 控制是否响应 SIGHUP 触发热重启（见 Frame.Restart）。默认关闭，传 true 显式开启。
 func WithRestartSignal(enabled bool) Option {
 	return func(f *Frame) {
 		f.config.EnableRestartSignal = enabled
@@ -75,13 +78,13 @@ type Frame struct {
 	singletons map[string]bool
 }
 
-// New 创建新的框架实例。
+// New 创建新的框架实例。SIGHUP 热重启默认关闭，需要时用 WithRestartSignal(true) 开启。
 func New(opts ...Option) *Frame {
 	f := &Frame{
 		components: make([]Component, 0),
 		config: &FrameConfig{
 			ShutdownTimeout:     30 * time.Second,
-			EnableRestartSignal: true,
+			EnableRestartSignal: false,
 		},
 		afterStartHooks: make([]Hook, 0),
 		beforeStopHooks: make([]Hook, 0),
@@ -140,7 +143,8 @@ func (f *Frame) Run() error {
 }
 
 // RunContext 同 Run，使用调用方传入的根 context。
-// SIGINT/SIGTERM 优雅退出；SIGHUP 默认触发 Restart，可用 WithRestartSignal(false) 关闭。
+// SIGINT/SIGTERM 优雅退出。SIGHUP 默认不处理；显式 WithRestartSignal(true) 后才会 Restart。
+// SIGHUP 不会重读配置，重启期间 HTTP 端口会短暂关闭，多副本部署应走滚动重启。
 func (f *Frame) RunContext(ctx context.Context) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -171,8 +175,10 @@ func (f *Frame) RunContext(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			// 上下文取消，执行 shutdown
-			return f.shutdown(runCtx)
+			// 调用方的根 ctx 已经取消：这里必须脱离它的取消信号再去 shutdown，否则
+			// Stop 里 WithTimeout(ctx, ShutdownTimeout) 派生出来的 ctx 一出生就是 Done 的，
+			// http.Server.Shutdown 会立刻返回而不等在途请求，"优雅关闭"名存实亡。
+			return f.shutdown(context.WithoutCancel(runCtx))
 		case sig := <-sigChan:
 			if sig == syscall.SIGHUP {
 				f.logInfo("received SIGHUP, restarting components")
@@ -246,8 +252,8 @@ func (f *Frame) Stop(ctx context.Context) error {
 	defer cancel()
 
 	var lastErr error
-	for i := len(components) - 1; i >= 0; i-- {
-		if err := components[i].Stop(shutdownCtx); err != nil {
+	for i, component := range slices.Backward(components) {
+		if err := component.Stop(shutdownCtx); err != nil {
 			lastErr = err
 			f.logError(fmt.Sprintf("error stopping component %d", i), err)
 		}

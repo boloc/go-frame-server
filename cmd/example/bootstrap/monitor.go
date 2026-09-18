@@ -11,6 +11,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
+// PrometheusConfig 对应配置段 prometheus。
+type PrometheusConfig struct {
+	Password string `mapstructure:"password"`
+}
+
 // SetupMonitor 注册进程级指标和 MySQL/Redis 连接池采集器，返回 /metrics 的 handler 链。
 // redisComponent 可以是单机、集群或哨兵组件；配置了 prometheus.password 时，链上会带 Basic Auth。
 func SetupMonitor(
@@ -31,9 +36,10 @@ func SetupMonitor(
 
 	metricsHandler := gin.WrapH(promhttp.Handler())
 
-	password := conf.GetString("prometheus.password")
-	if password == "" {
+	var cfg PrometheusConfig
+	conf.MustStrictUnmarshalKey("prometheus", &cfg)
+	if cfg.Password == "" {
 		return []gin.HandlerFunc{metricsHandler}
 	}
-	return []gin.HandlerFunc{monitor.PrometheusAuth(password), metricsHandler}
+	return []gin.HandlerFunc{monitor.PrometheusAuth(cfg.Password), metricsHandler}
 }

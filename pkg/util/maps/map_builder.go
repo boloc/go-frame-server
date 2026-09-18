@@ -1,5 +1,7 @@
 package maps
 
+import "maps"
+
 // MapBuilder 构建常量映射表的工具
 type MapBuilder[K comparable, V any] struct {
 	mapping map[K]V
@@ -20,9 +22,7 @@ func (m *MapBuilder[K, V]) Put(key K, value V) *MapBuilder[K, V] {
 
 // PutAll 批量添加键值对
 func (m *MapBuilder[K, V]) PutAll(entries map[K]V) *MapBuilder[K, V] {
-	for k, v := range entries {
-		m.mapping[k] = v
-	}
+	maps.Copy(m.mapping, entries)
 	return m
 }
 

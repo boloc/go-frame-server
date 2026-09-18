@@ -1,4 +1,4 @@
-// Package monitor 提供进程级资源指标采集，通过 MetricsComponent 接入 Frame 生命周期。
+// Package monitor 提供进程级资源指标采集，以及 HTTP 请求指标中间件。
 package monitor
 
 import (
@@ -7,13 +7,13 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/boloc/go-frame-server/pkg/frame/webx"
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
 var (
-	// 内存使用量
 	memoryUsage = promauto.NewGauge(
 		prometheus.GaugeOpts{
 			Name: "resource_memory_usage_bytes",
@@ -21,7 +21,6 @@ var (
 		},
 	)
 
-	// Goroutine数量
 	goroutineCount = promauto.NewGauge(
 		prometheus.GaugeOpts{
 			Name: "resource_goroutine_count",
@@ -29,26 +28,62 @@ var (
 		},
 	)
 
-	// 服务响应时间
-	resourceLatency = promauto.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Name: "source_response_time_seconds",
-			Help: "服务响应时间（秒）",
-			// 根据你的服务响应时间分布，调整这些值
-			Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1},
+	httpRequestsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "http_requests_total",
+			Help: "HTTP 请求总数",
 		},
-		[]string{"endpoint"},
+		[]string{"method", "route", "status", "biz_code"},
 	)
 
-	// 错误监控
-	sourceError = promauto.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "source_error_count",
-			Help: "服务错误监控",
+	httpRequestDuration = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "http_request_duration_seconds",
+			Help:    "HTTP 请求耗时（秒）",
+			Buckets: []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10},
 		},
-		[]string{"endpoint", "error_code"},
+		[]string{"method", "route"},
+	)
+
+	httpRequestsInFlight = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "http_requests_in_flight",
+			Help: "正在处理的 HTTP 请求数",
+		},
 	)
 )
+
+// HTTPMetrics 记录请求计数、耗时和 in-flight。跳过 /metrics 自身。
+// 与 middleware.AccessLog 都应 Use 在 ContextMiddleware 之后（要拿 request_id/client_ip）、业务路由之前。
+func HTTPMetrics() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.Request.URL.Path == "/metrics" {
+			c.Next()
+			return
+		}
+
+		httpRequestsInFlight.Inc()
+		defer httpRequestsInFlight.Dec()
+
+		start := time.Now()
+		c.Next()
+
+		route := c.FullPath()
+		if route == "" {
+			route = "unmatched"
+		}
+
+		biz := "none"
+		if code, ok := webx.BizCode(c); ok {
+			biz = strconv.Itoa(int(code))
+		}
+
+		method := c.Request.Method
+		status := strconv.Itoa(c.Writer.Status())
+		httpRequestsTotal.WithLabelValues(method, route, status, biz).Inc()
+		httpRequestDuration.WithLabelValues(method, route).Observe(time.Since(start).Seconds())
+	}
+}
 
 // MetricsConfig MetricsComponent 的配置。
 type MetricsConfig struct {
@@ -125,16 +160,6 @@ func updateMetrics() {
 
 	memoryUsage.Set(float64(memStats.Alloc))
 	goroutineCount.Set(float64(runtime.NumGoroutine()))
-}
-
-// ObserveLatency 记录响应时间
-func ObserveLatency(endpoint string, duration time.Duration) {
-	resourceLatency.WithLabelValues(endpoint).Observe(duration.Seconds())
-}
-
-// ObserveError 记录错误
-func ObserveError(endpoint string, errorCode int) {
-	sourceError.WithLabelValues(endpoint, strconv.Itoa(errorCode)).Inc()
 }
 
 // PrometheusAuth 给 /metrics 加 HTTP Basic Auth，password 由调用方传入。

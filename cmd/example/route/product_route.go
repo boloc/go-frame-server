@@ -10,7 +10,7 @@ import (
 
 // registerProductRoutes 演示 route -> handler -> logic -> repository 分层，并挂限流中间件。
 //
-//	for i in $(seq 1 15); do curl -s -o /dev/null -w "%{http_code}\n" localhost:10006/api/products; done
+//	for i in $(seq 1 15); do curl -s -o /dev/null -w "%{http_code}\n" localhost:10006/api/products/list; done
 func registerProductRoutes(r *gin.Engine) {
 	products := r.Group("/api/products")
 	products.Use(ratelimit.Middleware(ratelimit.WithLimit(10), ratelimit.WithWindow(time.Minute)))

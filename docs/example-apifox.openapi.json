@@ -1,6 +1,6 @@
 {
   "info": {
-    "description": "cmd/example 的 HTTP 接口文档。请导入同目录的 example-apifox.openapi.json（导入 → OpenAPI/Swagger）。\n\n本文件不使用 components / $ref / 数据模型，请求和响应都按真实返回字段写成示例数据。\n\n约定：\n- 业务接口默认 HTTP 200，成功看 `code=0`，失败看 body 里的 `code` / `message` / `fields`\n- 只有明确调用 `webx.FailWithStatus` 的接口才会返回非 200 的 HTTP 状态码\n- 端口以配置 `server.port` 为准，示例配置是 `10005`\n- `/test` 下的接口需要请求头 `X-Demo-Token`（任意非空值即可，例如 `x`）\n- `POST /api/orders` 必须带 `Idempotency-Key`\n- `/api/products` 组限流：同一 IP 每分钟 10 次，超限 HTTP 429\n",
+    "description": "cmd/example 的 HTTP 接口文档。导入本文件即可（导入 → OpenAPI/Swagger）。\n\n不使用 components / $ref / 数据模型，请求和响应按真实返回字段写成示例。\n\n约定：\n- 业务接口默认 HTTP 200，成功看 `code=0`，失败看 body 的 `code` / `message` / `fields`\n- 只有明确调用 `webx.FailWithStatus` 的接口才会返回非 200（限流 429、超限 413、真实 HTTP 404）\n- 端口以配置 `server.port` 为准，`config/frame-server.yml.example` 是 `10005`\n- 需要 `X-Demo-Token`（任意非空值，例如 `x`）的路径：`/test/**`、`POST /api/orders`\n- `POST /api/orders` 还必须带 `Idempotency-Key`；`X-Demo-Token` 同时是幂等 scope（同用户同键重放，换用户不冲突）\n- `/api/products` 组挂限流中间件：每个路由 FullPath × ClientIP 各 10 次/分钟（不是整组一个桶），超限 HTTP 429 + `Retry-After`\n- `/livez` 接 liveness；`/readyz`（及 `/health`）接 readiness。`log_db` 非关键，单独挂了不让整体变 503\n- panic 恢复返回 HTTP 500、空 body，不是 webx 格式\n",
     "title": "go-frame-server example",
     "version": "1.0.0"
   },
@@ -30,12 +30,13 @@
         "summary": "立即执行一次库存检查",
         "tags": [
           "定时任务"
-        ]
+        ],
+        "description": "手动调用与定时任务同一份 `ReportLowStock`。定时触发时 Exclusive：多副本抢 Redis 锁，抢不到 skipped；本接口是同步调用，不走锁。"
       }
     },
     "/api/cron/tasks": {
       "get": {
-        "description": "TaskInfo 没有 json tag，字段名是 Name / Schedule。",
+        "description": "TaskInfo 没有 json tag，字段名是 Name / Schedule，不含 Exclusive/LockTTL。report-low-stock 在代码里是 Exclusive=true（Redis 锁），列表接口不暴露这个字段。",
         "responses": {
           "200": {
             "content": {
@@ -74,8 +75,18 @@
     },
     "/api/orders": {
       "post": {
-        "description": "必须带 `Idempotency-Key`。内存仓储预置数据：\n- product_id=1 有货（库存 10）\n- product_id=2 售罄\n- product_id=3 不存在\n- product_id=4 已下架，校验层直接拒绝\n- product_id=999 模拟数据库故障\n",
+        "description": "必须带 `X-Demo-Token` 和 `Idempotency-Key`。token 既是演示鉴权，也是幂等 scope。\n`quantity` 校验：`required,min=1,max=99`。\n内存仓储预置：\n- product_id=1 有货（库存 10）\n- product_id=2 售罄 → code=10002\n- product_id=3 不存在 → code=40400\n- product_id=4 已下架，校验层拒绝 → code=40000\n- product_id=999 模拟数据库故障 → code=50001\n缺 token → code=40100；缺 Idempotency-Key → code=40000，文案「缺少 Idempotency-Key 请求头，该接口要求幂等保护」；同 token 同 key 重放首次成功响应；处理中再提交 → code=40900。\nRedis 不可用且 fail-closed（`WithFailOpen(false)`）→ code=50002「幂等保护服务暂时不可用，请稍后重试」。\n",
         "parameters": [
+          {
+            "example": "alice",
+            "in": "header",
+            "name": "X-Demo-Token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "演示用户。同时作为幂等 scope。"
+          },
           {
             "example": "demo-key-1",
             "in": "header",
@@ -83,7 +94,8 @@
             "required": true,
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "客户端幂等键。不要用 X-Request-Id。"
           }
         ],
         "requestBody": {
@@ -130,7 +142,7 @@
     },
     "/api/products/list": {
       "get": {
-        "description": "分页列表。`page` 默认 1，`page_size` 默认 20，最大 500。\n该组接口有限流：同一 IP 每分钟 10 次。\n",
+        "description": "分页列表。`page` 默认 1，`page_size` 默认 20，最大 500。`keyword` 最长 50。\n限流：本路径 × ClientIP 每分钟 10 次，超限 HTTP 429。组内其它路径各自计数。\n",
         "parameters": [
           {
             "example": 1,
@@ -285,17 +297,40 @@
               }
             },
             "description": "统一响应"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 42900,
+                  "message": "请求过于频繁，请稍后重试"
+                },
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "触发限流",
+            "headers": {
+              "Retry-After": {
+                "example": "60",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           }
         },
         "summary": "产品状态下拉选项",
         "tags": [
           "产品"
-        ]
+        ],
+        "description": "限流：本路径 × ClientIP 每分钟 10 次，超限 HTTP 429。组内其它路径各自计数。"
       }
     },
     "/api/products/summary": {
       "get": {
-        "description": "读 refreshcache 内存值，不查库。缓存未就绪时返回内部错误。",
+        "description": "读 refreshcache 内存值，不查库。缓存未就绪且 Loader 也失败时 code=50000，文案「产品数量统计暂不可用，请稍后重试」。\n限流：本路径 × ClientIP 每分钟 10 次，超限 HTTP 429。",
         "responses": {
           "200": {
             "content": {
@@ -313,6 +348,20 @@
               }
             },
             "description": "统一响应"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 42900,
+                  "message": "请求过于频繁，请稍后重试"
+                },
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "触发限流"
           }
         },
         "summary": "上架产品数量",
@@ -323,7 +372,7 @@
     },
     "/api/products/{id}": {
       "get": {
-        "description": "详情来自 default_db，公告 notice 来自 config_db 的 `product.notice` 缓存。",
+        "description": "详情来自 default_db，公告 notice 来自 config_db 的 `product.notice` 缓存（`ConfigKeyProductNotice`）。\n限流：本路径 × ClientIP 每分钟 10 次，超限 HTTP 429。",
         "parameters": [
           {
             "example": 1,
@@ -368,6 +417,20 @@
               }
             },
             "description": "统一响应"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 42900,
+                  "message": "请求过于频繁，请稍后重试"
+                },
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "触发限流"
           }
         },
         "summary": "产品详情",
@@ -416,12 +479,27 @@
               }
             },
             "description": "统一响应"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 42900,
+                  "message": "请求过于频繁，请稍后重试"
+                },
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "触发限流"
           }
         },
         "summary": "更新产品上架/下架状态",
         "tags": [
           "产品"
-        ]
+        ],
+        "description": "`status` 只能是 0（下架）或 1（上架），其它值 code=40000。\n限流：本路径 × ClientIP 每分钟 10 次，超限 HTTP 429。"
       }
     },
     "/api/system-configs/{key}": {
@@ -464,7 +542,7 @@
         ]
       },
       "post": {
-        "description": "写 config_db 主库，存在则更新。",
+        "description": "写 config_db 主库，存在则更新。`value` 必填，最长 1000。示例 key 是 `product.notice`。",
         "parameters": [
           {
             "example": "product.notice",
@@ -513,7 +591,7 @@
     },
     "/health": {
       "get": {
-        "description": "检查 default_db / config_db / redis（关键依赖）和 log_db（非关键）。关键依赖失败时 HTTP 503。",
+        "description": "与 `/readyz` 同一 handler，兼容别名。接 k8s readiness，不要接 liveness。",
         "responses": {
           "200": {
             "content": {
@@ -580,7 +658,31 @@
             "description": "关键依赖不健康"
           }
         },
-        "summary": "健康检查",
+        "summary": "就绪检查（兼容别名）",
+        "tags": [
+          "系统"
+        ]
+      }
+    },
+    "/livez": {
+      "get": {
+        "description": "接 k8s livenessProbe。只表示进程活着，不检查依赖、不做缓存。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "status": "ok"
+                },
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "进程存活"
+          }
+        },
+        "summary": "存活检查",
         "tags": [
           "系统"
         ]
@@ -588,7 +690,7 @@
     },
     "/metrics": {
       "get": {
-        "description": "进程级指标和连接池指标。生产环境建议配置 prometheus.password。",
+        "description": "Prometheus 文本：进程级、`http_requests_total` / `http_request_duration_seconds` / `http_requests_in_flight`、MySQL/Redis 连接池、cron 任务次数。配置了 `prometheus.password` 时需要 Basic Auth（用户名 prometheus）。本路径不走 AccessLog / HTTPMetrics。",
         "responses": {
           "200": {
             "content": {
@@ -605,6 +707,199 @@
         "summary": "Prometheus 指标",
         "tags": [
           "系统"
+        ],
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "仅当配置了 prometheus.password 时需要。Basic Auth，用户名 prometheus。",
+            "example": "Basic cHJvbWV0aGV1czp4eHg="
+          }
+        ]
+      }
+    },
+    "/readyz": {
+      "get": {
+        "description": "接 k8s readinessProbe。检查 default_db / config_db / redis（关键）和 log_db（非关键）。只有关键依赖失败才 HTTP 503。log_db 单独失败时 healthy 仍为 true。",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "checks": {
+                    "config_db": {
+                      "latency_ms": 1.4,
+                      "status": "ok"
+                    },
+                    "default_db": {
+                      "latency_ms": 1.2,
+                      "status": "ok"
+                    },
+                    "log_db": {
+                      "latency_ms": 1.1,
+                      "status": "ok"
+                    },
+                    "redis": {
+                      "latency_ms": 0.4,
+                      "status": "ok"
+                    }
+                  },
+                  "healthy": true
+                },
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "整体健康"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "checks": {
+                    "config_db": {
+                      "latency_ms": 1.4,
+                      "status": "ok"
+                    },
+                    "default_db": {
+                      "error": "db not initialized",
+                      "latency_ms": 3.1,
+                      "status": "error"
+                    },
+                    "log_db": {
+                      "error": "db not initialized",
+                      "latency_ms": 1,
+                      "status": "error"
+                    },
+                    "redis": {
+                      "latency_ms": 0.4,
+                      "status": "ok"
+                    }
+                  },
+                  "healthy": false
+                },
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "关键依赖不健康"
+          }
+        },
+        "summary": "就绪检查",
+        "tags": [
+          "系统"
+        ]
+      }
+    },
+    "/test/alert-dropped": {
+      "get": {
+        "description": "读取 alert.Dropped() 与 MaxInFlight=64。Hook 见 cmd/example/main.go。",
+        "parameters": [
+          {
+            "example": "x",
+            "in": "header",
+            "name": "X-Demo-Token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 0,
+                  "data": {
+                    "dropped": 0,
+                    "max_in_flight": 64,
+                    "hint": "Dropped 是 Hook 并发打满后丢弃的累计数。"
+                  },
+                  "message": "success"
+                },
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "统一响应"
+          }
+        },
+        "summary": "alert.Dropped 计数",
+        "tags": [
+          "能力演示"
+        ]
+      }
+    },
+    "/test/body-limit": {
+      "post": {
+        "description": "回显已被 ContextMiddleware 读入的 body 长度。超过 GinComponent 默认 4MB 时进不了 handler，HTTP 413 / code=41300（FailWithStatus）。",
+        "parameters": [
+          {
+            "example": "x",
+            "in": "header",
+            "name": "X-Demo-Token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "text/plain": {
+              "schema": {
+                "type": "string"
+              },
+              "example": "hello"
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 0,
+                  "data": {
+                    "bytes": 5,
+                    "hint": "超过 4MB 返回 413"
+                  },
+                  "message": "success"
+                },
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "未超限"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 41300,
+                  "message": "请求体超过大小限制"
+                },
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "超过 MaxBodyBytes"
+          }
+        },
+        "summary": "请求体大小限制",
+        "tags": [
+          "能力演示"
         ]
       }
     },
@@ -639,6 +934,97 @@
           }
         },
         "summary": "业务自定义错误码",
+        "tags": [
+          "能力演示"
+        ]
+      }
+    },
+    "/test/clickhouse/events": {
+      "post": {
+        "description": "写一条 ClickHouse 事件再按 event_id 查回。模型没有 json tag，字段名是 EventID / Name / CreatedAt。不传 name 时用 demo-event。`name` 可选，最长 64。clickhouse.enabled=false 或未连接时 code=50003，不 panic。",
+        "parameters": [
+          {
+            "example": "x",
+            "in": "header",
+            "name": "X-Demo-Token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              },
+              "example": {
+                "name": "demo"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 0,
+                  "message": "success",
+                  "data": {
+                    "written": {
+                      "EventID": "550e8400-e29b-41d4-a716-446655440000",
+                      "Name": "demo",
+                      "CreatedAt": "2026-09-08T12:00:00Z"
+                    },
+                    "loaded": {
+                      "EventID": "550e8400-e29b-41d4-a716-446655440000",
+                      "Name": "demo",
+                      "CreatedAt": "2026-09-08T12:00:00Z"
+                    },
+                    "hint": "用 components.TryDefaultClickHouseDB，未启用时返回业务错误而不是 panic"
+                  }
+                },
+                "schema": {
+                  "type": "object"
+                },
+                "examples": {
+                  "ok": {
+                    "summary": "已启用",
+                    "value": {
+                      "code": 0,
+                      "message": "success",
+                      "data": {
+                        "written": {
+                          "EventID": "550e8400-e29b-41d4-a716-446655440000",
+                          "Name": "demo",
+                          "CreatedAt": "2026-09-08T12:00:00Z"
+                        },
+                        "loaded": {
+                          "EventID": "550e8400-e29b-41d4-a716-446655440000",
+                          "Name": "demo",
+                          "CreatedAt": "2026-09-08T12:00:00Z"
+                        },
+                        "hint": "用 components.TryDefaultClickHouseDB，未启用时返回业务错误而不是 panic"
+                      }
+                    }
+                  },
+                  "disabled": {
+                    "summary": "未启用",
+                    "value": {
+                      "code": 50003,
+                      "message": "ClickHouse 未启用（clickhouse.enabled=false 或尚未连接）"
+                    }
+                  }
+                }
+              }
+            },
+            "description": "统一响应"
+          }
+        },
+        "summary": "ClickHouse GORM 读写",
         "tags": [
           "能力演示"
         ]
@@ -700,7 +1086,7 @@
                 "example": {
                   "code": 0,
                   "data": {
-                    "caller": "internal/example/handler/capability_handler.go:94",
+                    "caller": "internal/example/handler/capability_handler.go:123",
                     "code": 50001,
                     "hint": "caller 精确指向 capability_handler.go 里 simulateQueryFailure 调用 errs.Database 的那一行，即使中间经过了两层普通函数调用",
                     "message": "数据处理失败"
@@ -887,6 +1273,106 @@
         ]
       }
     },
+    "/test/logger": {
+      "get": {
+        "description": "打一条带 request_id/route 的结构化日志。stdout JSON 见 logs.stdout_json。",
+        "parameters": [
+          {
+            "example": "x",
+            "in": "header",
+            "name": "X-Demo-Token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 0,
+                  "data": {
+                    "hint": "看一条带 request_id/route 的 info 日志；JSON 控制台见 logs.stdout_json 与 bootstrap/logger.go"
+                  },
+                  "message": "success"
+                },
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "统一响应"
+          }
+        },
+        "summary": "字段化日志",
+        "tags": [
+          "能力演示"
+        ]
+      }
+    },
+    "/test/maps": {
+      "get": {
+        "description": "演示 pkg/util/maps 的 MapBuilder / StructSliceToMap / ExtractField / SliceToMap / GetOrDefault。下拉选项请用 options。",
+        "parameters": [
+          {
+            "example": "x",
+            "in": "header",
+            "name": "X-Demo-Token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 0,
+                  "data": {
+                    "builder": {
+                      "1": "alpha",
+                      "2": "beta"
+                    },
+                    "by_id": {
+                      "1": {
+                        "ID": 1,
+                        "Title": "alpha"
+                      },
+                      "2": {
+                        "ID": 2,
+                        "Title": "beta"
+                      }
+                    },
+                    "titles": [
+                      "alpha",
+                      "beta"
+                    ],
+                    "from_slice": {
+                      "1": "alpha",
+                      "2": "beta"
+                    },
+                    "missing": "unknown"
+                  },
+                  "message": "success"
+                },
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "统一响应"
+          }
+        },
+        "summary": "util/maps",
+        "tags": [
+          "能力演示"
+        ]
+      }
+    },
     "/test/not-found": {
       "get": {
         "parameters": [
@@ -959,7 +1445,7 @@
     },
     "/test/panic": {
       "get": {
-        "description": "被 gin.Recovery 兜住，进程不退出，返回默认 500，不是 webx 统一响应。",
+        "description": "故意 panic。GinComponent 用 CustomRecoveryWithWriter 接到 pkg/logger + alert.Notify，进程不退出。响应是 HTTP 500、空 body，不是 webx 统一格式。",
         "parameters": [
           {
             "example": "x",
@@ -973,17 +1459,15 @@
         ],
         "responses": {
           "500": {
+            "description": "空 body（不是 JSON）",
             "content": {
-              "application/json": {
-                "example": {
-                  "error": "演示用：故意触发一次 panic"
-                },
+              "text/plain": {
                 "schema": {
-                  "type": "object"
-                }
+                  "type": "string"
+                },
+                "example": ""
               }
-            },
-            "description": "gin Recovery 默认响应"
+            }
           }
         },
         "summary": "故意 panic",
@@ -992,8 +1476,183 @@
         ]
       }
     },
+    "/test/reqctx": {
+      "get": {
+        "description": "展示 reqctx.FromGin 的 RequestID / ClientIP / RequestBody / CustomData。RequestID 不是幂等键。",
+        "parameters": [
+          {
+            "example": "x",
+            "in": "header",
+            "name": "X-Demo-Token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "example": "demo-rid",
+            "in": "header",
+            "name": "X-Request-Id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 0,
+                  "message": "success",
+                  "data": {
+                    "request_id": "demo-rid",
+                    "client_ip": "127.0.0.1",
+                    "user_agent": "curl/8.0",
+                    "request_body": "",
+                    "custom_data.demo_note": "via CustomData",
+                    "biz_code_before_write": 0,
+                    "biz_code_ok": false,
+                    "hint": "RequestID 不是幂等键。AccessLog / HTTPMetrics 在 handler 返回后用 webx.BizCode 读本次业务码。"
+                  }
+                },
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "统一响应"
+          }
+        },
+        "summary": "请求上下文",
+        "tags": [
+          "能力演示"
+        ]
+      },
+      "post": {
+        "description": "POST 时 data.request_body 回显原文。",
+        "parameters": [
+          {
+            "example": "x",
+            "in": "header",
+            "name": "X-Demo-Token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "text/plain": {
+              "schema": {
+                "type": "string"
+              },
+              "example": "payload"
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 0,
+                  "data": {
+                    "request_body": "payload",
+                    "request_id": "..."
+                  },
+                  "message": "success"
+                },
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "统一响应"
+          }
+        },
+        "summary": "请求上下文（带 body）",
+        "tags": [
+          "能力演示"
+        ]
+      }
+    },
+    "/test/slow": {
+      "get": {
+        "description": "听 c.Request.Context()。`sleep` 必须是 Go duration（例如 `3s`、`500ms`），非法值 code=40000。把 server.request_timeout 设为 1s 后再 ?sleep=3s 会返回 code=50004。",
+        "parameters": [
+          {
+            "example": "x",
+            "in": "header",
+            "name": "X-Demo-Token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "example": "3s",
+            "in": "query",
+            "name": "sleep",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 0,
+                  "data": {
+                    "slept": "0s",
+                    "ctx_has_deadline": false
+                  },
+                  "message": "success"
+                },
+                "schema": {
+                  "type": "object"
+                },
+                "examples": {
+                  "ok": {
+                    "summary": "未超时",
+                    "value": {
+                      "code": 0,
+                      "message": "success",
+                      "data": {
+                        "slept": "0s",
+                        "ctx_has_deadline": false,
+                        "ctx_deadline": "0001-01-01T00:00:00Z",
+                        "hint": "把 server.request_timeout 设为 1s 后再请求 ?sleep=3s，会走 ctx.Done() 返回 code=50004"
+                      }
+                    }
+                  },
+                  "timeout": {
+                    "summary": "request_timeout=1s 且 sleep=3s",
+                    "value": {
+                      "code": 50004,
+                      "message": "请求超时"
+                    }
+                  }
+                }
+              }
+            },
+            "description": "统一响应"
+          }
+        },
+        "summary": "请求超时取消",
+        "tags": [
+          "能力演示"
+        ]
+      }
+    },
     "/test/storage/objects": {
       "delete": {
+        "description": "未配置 `storage.r2` 时 code=50003「对象存储未配置，请检查 storage.r2 配置项」。",
         "parameters": [
           {
             "example": "x",
@@ -1036,6 +1695,7 @@
         ]
       },
       "get": {
+        "description": "未配置 `storage.r2` 时 code=50003「对象存储未配置，请检查 storage.r2 配置项」。",
         "parameters": [
           {
             "example": "x",
@@ -1093,7 +1753,7 @@
     },
     "/test/storage/presigned-url": {
       "get": {
-        "description": "expires_seconds 不传或小于等于 0 时默认 15 分钟。",
+        "description": "expires_seconds 不传或小于等于 0 时默认 15 分钟。未配置 `storage.r2` 时 code=50003「对象存储未配置，请检查 storage.r2 配置项」，不 panic。",
         "parameters": [
           {
             "example": "x",
@@ -1150,7 +1810,7 @@
     },
     "/test/storage/upload": {
       "post": {
-        "description": "multipart 字段名是 `file`。未配置 `storage.r2` 时返回依赖错误，不会 panic。UploadResult 没有 json tag，字段名是 URL / Key / Size / ContentType。",
+        "description": "multipart 字段名是 `file`。未配置 `storage.r2` 时 code=50003「对象存储未配置，请检查 storage.r2 配置项」，不会 panic。UploadResult 没有 json tag，字段名是 URL / Key / Size / ContentType。",
         "parameters": [
           {
             "example": "x",
@@ -1249,7 +1909,7 @@
     },
     "/test/timezone": {
       "get": {
-        "description": "用 `SELECT ?` 把当前时间经 default_db 走一圈，不写业务表。",
+        "description": "用 `SELECT CAST(? AS DATETIME(3))` 把当前时间经 default_db 走一圈，不写业务表。server.timezone 决定 process_timezone / go_time_now；连接 loc 默认 UTC，决定 mysql_round_trip_raw。展示给用户用 mysql_round_trip_display（util.FormatLocal）。",
         "parameters": [
           {
             "example": "x",
@@ -1267,14 +1927,14 @@
               "application/json": {
                 "example": {
                   "code": 0,
+                  "message": "success",
                   "data": {
-                    "go_time_now": "2026-08-15 10:23:00 +0000 UTC",
-                    "hint": "go_time_now 是项目时区（server.timezone）下的当前时间；mysql_round_trip_raw 是同一个瞬间经过 default_db 连接写入再读出后，按那个连接自己的 loc 解释出来的值；mysql_round_trip_display 是再转换回项目时区后应该展示给用户的值。",
-                    "mysql_round_trip_display": "2026-08-15 10:23:00",
-                    "mysql_round_trip_raw": "2026-08-15 10:23:00 +0000 UTC",
-                    "process_timezone": "UTC"
-                  },
-                  "message": "success"
+                    "process_timezone": "Asia/Shanghai",
+                    "go_time_now": "2026-09-08 20:08:12 +0800 CST",
+                    "mysql_round_trip_raw": "2026-09-08 12:08:12 +0000 UTC",
+                    "mysql_round_trip_display": "2026-09-08 20:08:12",
+                    "hint": "go_time_now 是项目时区；mysql_round_trip_raw 按连接 loc（默认 UTC）解释；mysql_round_trip_display 转回项目时区，应与 go_time_now 同一秒。"
+                  }
                 },
                 "schema": {
                   "type": "object"
@@ -1325,9 +1985,91 @@
         ]
       }
     },
+    "/test/validatable": {
+      "post": {
+        "description": "演示 validate.Validatable：Bind 自动调 Validate()。业务 DTO 不要这么写，用 validation 包。`password` 还有 `min=6`：短密码走 tag/`fields`，不是「两次密码不一致」。",
+        "parameters": [
+          {
+            "example": "x",
+            "in": "header",
+            "name": "X-Demo-Token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              },
+              "example": {
+                "password": "secret",
+                "confirm": "secret"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "code": 0,
+                  "data": {
+                    "ok": true
+                  },
+                  "message": "success"
+                },
+                "schema": {
+                  "type": "object"
+                },
+                "examples": {
+                  "ok": {
+                    "summary": "两次密码一致",
+                    "value": {
+                      "code": 0,
+                      "message": "success",
+                      "data": {
+                        "ok": true
+                      }
+                    }
+                  },
+                  "mismatch": {
+                    "summary": "两次密码不一致",
+                    "value": {
+                      "code": 40000,
+                      "message": "两次密码不一致"
+                    }
+                  },
+                  "too_short": {
+                    "summary": "password 短于 6，走 tag 校验",
+                    "value": {
+                      "code": 40000,
+                      "message": "参数校验失败",
+                      "fields": {
+                        "password": "password 不能小于 6"
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "description": "统一响应"
+          }
+        },
+        "summary": "Validatable 自动校验",
+        "tags": [
+          "能力演示"
+        ]
+      }
+    },
     "/test/validation-error": {
       "get": {
-        "description": "不传 id 或传 id=0 会触发 validate required，响应带 fields。",
+        "description": "不传 id 或传 id=0 都会触发 validate:\"required\"。失败时 HTTP 200、code=40000，fields 标出具体字段。传合法 id 才走成功分支（data 没有 json tag，字段名是 ID）。",
         "parameters": [
           {
             "example": "x",
@@ -1355,11 +2097,33 @@
                   "type": "object"
                 },
                 "example": {
-                  "code": 0,
-                  "data": {
-                    "ID": 1
+                  "code": 40000,
+                  "message": "参数校验失败",
+                  "fields": {
+                    "id": "id 不能为空"
+                  }
+                },
+                "examples": {
+                  "invalid": {
+                    "summary": "校验失败（本接口主要演示这个）",
+                    "value": {
+                      "code": 40000,
+                      "message": "参数校验失败",
+                      "fields": {
+                        "id": "id 不能为空"
+                      }
+                    }
                   },
-                  "message": "success"
+                  "ok": {
+                    "summary": "合法 id",
+                    "value": {
+                      "code": 0,
+                      "message": "success",
+                      "data": {
+                        "ID": 1
+                      }
+                    }
+                  }
                 }
               }
             },
@@ -1375,7 +2139,7 @@
   },
   "servers": [
     {
-      "description": "本地 example",
+      "description": "本地 example（端口以 server.port 为准，yml.example 默认 10005）",
       "url": "http://127.0.0.1:10005"
     }
   ],

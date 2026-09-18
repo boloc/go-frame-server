@@ -36,9 +36,18 @@ type Options struct {
 	TTL       time.Duration
 	// Required 为 true 时，缺少幂等键直接拒绝。
 	Required bool
-	// FailOpen Redis 不可用时是否放行，默认 true。
+	// FailOpen 控制 Redis 不可用（拿不到 client 或 SETNX 失败）时的降级：
+	// true（默认）放行并失去幂等保护；false 拒绝请求。金融/支付类应显式设为 false。
+	// 只影响 Redis 故障，不影响"键冲突 / 重放"等正常路径。
 	FailOpen bool
-	Redis    func() (redis.Cmdable, bool)
+	// ScopeFunc 把调用方维度拼进 Redis key。返回非空时 key 为
+	// KeyPrefix + FullPath + ":" + scope + ":" + 幂等键；返回空则保持
+	// KeyPrefix + FullPath + ":" + 幂等键。
+	//
+	// 需要：键由客户端生成且可能跨用户重复，或要防止猜别人的键重放响应。
+	// 不需要：键是全局唯一 UUID，或接口没有用户概念。
+	ScopeFunc func(c *gin.Context) string
+	Redis     func() (redis.Cmdable, bool)
 }
 
 // Option 函数式选项。
@@ -50,6 +59,11 @@ func WithTTL(ttl time.Duration) Option   { return func(o *Options) { o.TTL = ttl
 func WithRequired(required bool) Option  { return func(o *Options) { o.Required = required } }
 
 func WithFailOpen(failOpen bool) Option { return func(o *Options) { o.FailOpen = failOpen } }
+
+// WithScopeFunc 设置幂等键作用域。fn 返回非空时拼进 Redis key，返回空时 key 格式不变。
+func WithScopeFunc(fn func(c *gin.Context) string) Option {
+	return func(o *Options) { o.ScopeFunc = fn }
+}
 
 func WithRedis(fn func() (redis.Cmdable, bool)) Option { return func(o *Options) { o.Redis = fn } }
 
@@ -78,6 +92,17 @@ type codeEnvelope struct {
 
 // Middleware 创建幂等中间件。缺少幂等键时按 Required 决定拒绝或放行；
 // 已有最终结果则重放，处理中返回冲突；内部错误不缓存，允许重试。
+//
+// Redis key 默认是 KeyPrefix + FullPath + ":" + 请求头里的幂等键。
+// 用 WithScopeFunc 可以把调用方维度（如用户 ID）拼进 key，避免不同用户传相同
+// 幂等键时互相重放对方的响应。ScopeFunc 返回空字符串时 key 格式不变。
+//
+// 什么时候需要 ScopeFunc：键由客户端生成且可能跨用户重复（例如都传 "1"），
+// 或需要防止恶意用户猜别人的键重放响应。
+// 什么时候不需要：键是全局唯一 UUID，或接口没有用户概念。
+//
+// Redis 不可用（拿不到 client 或 SETNX 失败）时按 FailOpen 降级，行为不变：
+// FailOpen=true（默认）不做保护、放行请求并告警；FailOpen=false 拒绝请求。
 func Middleware(opts ...Option) gin.HandlerFunc {
 	o := defaultOptions()
 	for _, opt := range opts {
@@ -102,7 +127,7 @@ func Middleware(opts ...Option) gin.HandlerFunc {
 			return
 		}
 
-		redisKey := o.KeyPrefix + c.FullPath() + ":" + key
+		redisKey := buildRedisKey(o, c, key)
 		ctx := c.Request.Context()
 
 		claimed, err := client.SetNX(ctx, redisKey, processingMarker, o.TTL).Result()
@@ -130,6 +155,16 @@ func Middleware(opts ...Option) gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+func buildRedisKey(o *Options, c *gin.Context, key string) string {
+	base := o.KeyPrefix + c.FullPath()
+	if o.ScopeFunc != nil {
+		if scope := o.ScopeFunc(c); scope != "" {
+			return base + ":" + scope + ":" + key
+		}
+	}
+	return base + ":" + key
 }
 
 func degrade(c *gin.Context, o *Options, reason, key string, err error) {
@@ -167,6 +202,13 @@ func replayOrReject(c *gin.Context, client redisClient, redisKey string) {
 	if err := json.Unmarshal([]byte(cached), &resp); err != nil {
 		webx.Fail(c, errs.Conflict("重复请求"))
 		return
+	}
+	// 重放的是缓存的原始字节，没有经过 webx.Success/Fail，所以 webx.BizCodeKey 不会被写入，
+	// AccessLog/HTTPMetrics 会把这次请求记成 biz_code=-1/none 并当成异常（Warn）。这里把缓存
+	// 体里的业务码解出来补上，让重放请求在日志和指标里跟首次请求长得一样。
+	var env codeEnvelope
+	if err := json.Unmarshal([]byte(resp.Body), &env); err == nil && env.Code != nil {
+		c.Set(webx.BizCodeKey, *env.Code)
 	}
 	c.Data(resp.Status, resp.ContentType, []byte(resp.Body))
 }

@@ -136,8 +136,10 @@ func WithSentinelConnectRetryInterval(interval time.Duration) RedisSentinelOptio
 func NewRedisSentinelComponent(opts ...RedisSentinelOption) *RedisSentinelComponent {
 	r := &RedisSentinelComponent{
 		config: &redis.FailoverOptions{
-			PoolSize:     10,
-			MinIdleConns: 10,
+			// PoolSize=32 / MinIdleConns=4：150 QPS 量级、PoolTimeout 5s 下 10 条连接容易排队；
+			// MinIdleConns 不应等于 PoolSize，否则永远维持满池且没有突发余量。
+			PoolSize:     32,
+			MinIdleConns: 4,
 			ReadTimeout:  5 * time.Second,
 			WriteTimeout: 5 * time.Second,
 			MaxRetries:   3,
@@ -155,6 +157,7 @@ func NewRedisSentinelComponent(opts ...RedisSentinelOption) *RedisSentinelCompon
 
 // Start 启动 Redis 哨兵组件：Ping 成功后发布为全局实例。初次连接失败会按 connectRetry 重试。
 func (r *RedisSentinelComponent) Start(ctx context.Context) error {
+	setRedisLoggerOnce()
 	if r.config.MasterName == "" {
 		return fmt.Errorf("redis sentinel: MasterName 未配置（对应哨兵 monitor 的 name）")
 	}

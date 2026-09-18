@@ -19,6 +19,9 @@ type ProductRepository struct {
 }
 
 // NewProductRepository 创建产品仓储。master/slave 用方法值延迟取连接。
+// 这里用 panic 版访问器（DefaultDB / DefaultSlaveDB）是约定：MySQL 是进程运行的必需依赖，
+// 请求期连不上应被 gin.Recovery 打成 500，而不是每个方法都写 if !ok。可选依赖（ClickHouse /
+// 对象存储）必须用 Try*。详见 docs/api-conventions.md。
 func NewProductRepository() *ProductRepository {
 	return &ProductRepository{
 		master: frame.DefaultDB,

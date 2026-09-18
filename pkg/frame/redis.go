@@ -6,7 +6,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// panic 版访问器适合启动阶段；运行时请用对应的 Try 版本。
+// panic 版访问器适合启动阶段；健康检查/可选依赖请用对应的 Try 版本。
 
 // TryGetRedis 获取全局 Redis 单机实例；未初始化时返回 (nil, false)，不 panic。
 func TryGetRedis() (*redis.Client, bool) {
@@ -16,7 +16,7 @@ func TryGetRedis() (*redis.Client, bool) {
 	return components.GlobalRedisComponent.GetClient(), true
 }
 
-// GetRedis 获取全局 Redis 单机实例；未初始化时 panic。运行时请用 TryGetRedis。
+// GetRedis 获取全局 Redis 单机实例；未初始化时 panic。健康检查/可选依赖请用 TryGetRedis。
 func GetRedis() *redis.Client {
 	client, ok := TryGetRedis()
 	if !ok {
@@ -33,7 +33,7 @@ func TryGetRedisCluster() (*redis.ClusterClient, bool) {
 	return components.GlobalRedisClusterComponent.GetClient(), true
 }
 
-// GetRedisCluster 获取全局 Redis 集群实例；未初始化时 panic。运行时请用 TryGetRedisCluster。
+// GetRedisCluster 获取全局 Redis 集群实例；未初始化时 panic。健康检查/可选依赖请用 TryGetRedisCluster。
 func GetRedisCluster() *redis.ClusterClient {
 	client, ok := TryGetRedisCluster()
 	if !ok {
@@ -51,7 +51,7 @@ func TryGetRedisSentinel() (*redis.Client, bool) {
 	return components.GlobalRedisSentinelComponent.GetClient(), true
 }
 
-// GetRedisSentinel 获取全局 Redis 哨兵实例；未初始化时 panic。运行时请用 TryGetRedisSentinel。
+// GetRedisSentinel 获取全局 Redis 哨兵实例；未初始化时 panic。健康检查/可选依赖请用 TryGetRedisSentinel。
 func GetRedisSentinel() *redis.Client {
 	client, ok := TryGetRedisSentinel()
 	if !ok {
@@ -74,7 +74,7 @@ func TryGetRedisCmdable() (redis.Cmdable, bool) {
 	return nil, false
 }
 
-// GetRedisCmdable 获取通用 Redis 接口（集群 > 哨兵 > 单机）；均未初始化时 panic。运行时请用 TryGetRedisCmdable。
+// GetRedisCmdable 获取通用 Redis 接口（集群 > 哨兵 > 单机）；均未初始化时 panic。健康检查/可选依赖请用 TryGetRedisCmdable。
 func GetRedisCmdable() redis.Cmdable {
 	client, ok := TryGetRedisCmdable()
 	if !ok {

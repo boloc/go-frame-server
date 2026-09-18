@@ -1,30 +1,44 @@
 # Server Configuration
 server:
-  env: local # local/test/production
-  name: go-github.com/boloc/go-frame-server
+  env: local # local/dev/test/production，写错会启动失败
+  name: go-github.com/boloc/go-frame-server # 进程标识；当前 bootstrap 不消费，但必须留在本段，多写未知字段会启动失败
   port: 10005
   timezone: UTC # 进程默认时区（IANA 时区名，如 Asia/Shanghai），未配置时默认 UTC
+  # 部署在 Nginx/负载均衡/CDN 后面时必须填代理网段，否则 c.ClientIP() 全是代理 IP，
+  # 按 IP 限流会把所有用户当成同一个人。直连对外时显式写 []。不要写 0.0.0.0/0。
+  # 不写这一项（与写 [] 不同）：Release 模式下 Gin Start 会失败。
+  trusted_proxies: []
+  #  - 10.0.0.0/8
+  #  - 172.16.0.0/12
+  # 请求整体超时（0s 关闭）。开启后 handler 里的 c.Request.Context() 到期会取消。
+  request_timeout: 0s
 
 # logs Configuration
 logs:
-  log_level: production # 日志级别
+  log_level: info # 日志级别，只认 debug/info/warn/error，写错会直接启动失败
   is_stdout: true # 是否输出到标准输出
+  stdout_json: false # 标准输出是否用 JSON；容器环境靠采集器收 stdout 时改成 true，避免 ANSI 颜色码混进日志系统
   is_file: true # 是否输出到文件
-  file_name: frame.log # 日志文件名
+  file_name: frame.log # 只写文件名时落到 ./logs/ 下；写带目录的路径（如 /var/log/app/app.log）则原样使用
   max_size: 100    # 单个文件最大尺寸，单位 MB
-  max_backups: 3    # 最多保留 60 个备份
-  max_age: 7    # 最多保留 30 天
+  max_backups: 3    # 最多保留 3 个备份
+  max_age: 7    # 最多保留 7 天
   compress: true # 是否压缩
 
 # Database Configuration
+# bootstrap 会读 database.default_db / database.config_db / database.log_db；
+# 下面 frame_server 是结构示例。database.auto_migrate 与实例并列，不会被实例结构体当成未知字段。
 database:
+  # 是否自动执行 GORM AutoMigrate，默认关闭。生产破坏性变更不要依赖它。
+  auto_migrate: false
   frame_server: # 数据库名称
     # 通用配置
-    max_idle_conns: 10 # 设置空闲连接池中的最大连接数
-    max_open_conns: 100 # 设置打开数据库连接的最大数量
+    max_idle_conns: 25 # 空闲连接池最大连接数；跟 max_open_conns 的比例不要太悬殊，否则并发峰值过后连接会被频繁开关
+    max_open_conns: 50 # 打开连接数硬顶，按 MySQL 服务端 max_connections 预算设置，不是"越大越好"
     conn_max_lifetime: 1h0m0s # 设置连接可复用的最大时间 (类型为: time.Duration)
+    conn_max_idle_time: 10m # 空闲超过该时间后从池中剔除，应明显小于 MySQL wait_timeout
     prefix: gm_
-    # 主库配置
+    # 主库配置（host/port/name/user 由 BuildMysqlDSN 校验；parse_time 已内置为 true，不要再写）
     master:
       host: 192.168.1.30
       port: 3306
@@ -32,8 +46,11 @@ database:
       user: root
       password: root
       charset: utf8mb4
-      parse_time: true # true: 允许 MySQL 驱动将 MySQL 的 DATE 和 DATETIME 类型自动转换为 Go 的 time.Time 类型 false:时间类型会以字符串形式返回
+      collation: utf8mb4_0900_ai_ci # 可选；MySQL 8 默认排序
       loc: UTC # 连接的时区，跟 server.timezone 无关，留空默认 UTC（可以指定具体时区，如 Asia/Shanghai，覆盖这个实例自己存量数据的时区）
+      timeout: 5s # 建连超时，留空默认 5s；没有它数据库不可达时会卡到操作系统的 TCP 超时
+      # read_timeout: 30s  # 单次 I/O 超时，留空不限制；确认没有超过这个时长的合法慢查询再开
+      # write_timeout: 30s
     # slaves:
     #   - host: 192.168.1.30 # 从库1
     #     port: 3306
@@ -41,7 +58,7 @@ database:
     #     user: root
     #     password: root
     #     charset: utf8mb4
-    #     parse_time: true # true: 允许 MySQL 驱动将 MySQL 的 DATE 和 DATETIME 类型自动转换为 Go 的 time.Time 类型 false:时间类型会以字符串形式返回
+    #     collation: utf8mb4_0900_ai_ci
     #     loc: UTC # 连接的时区，留空默认 UTC（可以指定具体时区，如 Asia/Shanghai）
     #   - host: 192.168.1.30 # 从库2
     #     port: 3306
@@ -57,21 +74,21 @@ redis:
     addr: 192.168.1.10:6379
     password: ""
     db: 0
-    pool_size: 10 # 连接池大小
-    min_idle_conns: 10 # 最小空闲连接数
+    pool_size: 32 # 连接池大小（框架默认 32；150 QPS 量级够用，按 Redis 端 maxclients 预算调整）
+    min_idle_conns: 4 # 最小空闲连接数，不要等于 pool_size
     dial_timeout: 5s # 连接超时时间
     read_timeout: 5s # 读取超时时间
     write_timeout: 5s # 写入超时时间
     max_retries: 3 # 最大重试次数
   cluster:
     password: "" # 集群密码
-    pool_size: 10 # 连接池大小
-    min_idle_conns: 10 # 最小空闲连接数
+    pool_size: 32 # 连接池大小（框架默认 32；150 QPS 量级够用，按 Redis 端 maxclients 预算调整）
+    min_idle_conns: 4 # 最小空闲连接数，不要等于 pool_size
     dial_timeout: 5s # 连接超时时间
     read_timeout: 5s # 读取超时时间
     write_timeout: 5s # 写入超时时间
     max_retries: 3 # 最大重试次数
-    route_randomly: true # 是否随机路由
+    route_randomly: false # 开启会读从节点，幂等/限流场景会读到滞后数据
     min_retry_backoff: 100ms # 最小重试间隔时间
     max_retry_backoff: 2s # 最大重试间隔时间
     nodes:
@@ -81,10 +98,45 @@ redis:
       - 192.168.1.6:7004
       - 192.168.1.6:7005
       - 192.168.1.6:7006
+  sentinel:
+    master_name: mymaster # 哨兵配置里 sentinel monitor <name> 的 name
+    addrs:
+      - 192.168.1.10:26379
+    password: "" # 哨兵节点自己的密码
+    data_password: "" # Redis 数据节点（主/从）的密码，可以和哨兵密码不同
+    db: 0
+    pool_size: 32
+    min_idle_conns: 4
+    dial_timeout: 5s
+    read_timeout: 5s
+    write_timeout: 5s
+    max_retries: 3
+
+# 定时任务调度器：多副本时通常只让一个副本跑。不写这一项默认启用；显式 false 才关闭。
+cron:
+  enabled: true
 
 # prometheus相关
 prometheus:
   password: ""
+
+# ClickHouse（当前 bootstrap 走 GORM 组件，实例名固定 default_ch）。
+# enabled 不写默认启用；显式 false 跳过建连。log_level 取值与 GormLogLevelForEnv 一致：local/dev/test/production/silent。
+clickhouse:
+  enabled: false
+  default_ch:
+    host: 127.0.0.1
+    port: 9000
+    database: example
+    username: default
+    password: ""
+    protocol: native
+    max_open_conns: 10
+    max_idle_conns: 5
+    conn_max_lifetime: 1h
+    dial_timeout: 10s
+    read_timeout: 20s
+    log_level: local
 
 # 对象存储配置，见 pkg/frame/storage/README.md（这个包本身没有独立的 Setup 生命周期，
 # 按需在业务的 bootstrap 里读这段配置创建 storage.S3Client）

@@ -20,7 +20,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
-	"github.com/google/uuid"
+	"uuid"
 )
 
 const defaultContentType = "application/octet-stream"
@@ -182,10 +182,7 @@ func truncateFileName(fileName, ext string, maxLen int) string {
 		return fileName
 	}
 	withoutExt := strings.TrimSuffix(fileName, ext)
-	keep := maxLen - len(ext)
-	if keep < 0 {
-		keep = 0
-	}
+	keep := max(maxLen-len(ext), 0)
 	if keep > len(withoutExt) {
 		keep = len(withoutExt)
 	}

@@ -1,4 +1,6 @@
-// Package validation 做不查库的业务规则校验，与 dto 上的 struct tag 格式校验分开。
+// Package validation 做不查库的跨字段/业务规则校验，由 handler 显式调用。
+// 与「dto 实现 validate.Validatable、Bind 自动跑 Validate()」是两条路：本项目业务 DTO
+// 只用 tag + 本包，Validatable 的自动调用见 POST /test/validatable。
 package validation
 
 import (

@@ -11,7 +11,6 @@ type SystemConfig struct {
 	UpdatedAt   time.Time `gorm:"not null"`
 }
 
-// TableName 显式指定表名。
-func (SystemConfig) TableName() string {
-	return "system_configs"
-}
+// 表名由 GORM 默认命名策略生成（system_configs），并自动带上该实例在配置里的 prefix
+// （database.<name>.prefix）。不要在这里实现 TableName()：显式返回固定表名会绕过
+// NamingStrategy，配置里的 prefix 就静默失效了。

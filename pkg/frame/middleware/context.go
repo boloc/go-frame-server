@@ -3,14 +3,16 @@ package middleware
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
+	"net/http"
 
 	"github.com/boloc/go-frame-server/pkg/errs"
 	"github.com/boloc/go-frame-server/pkg/frame/reqctx"
 	"github.com/boloc/go-frame-server/pkg/frame/webx"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
+	"uuid"
 )
 
 // RequestIDHeader 请求/响应头中的请求 ID。这是单次调用的追踪 ID，不是幂等键。
@@ -27,7 +29,13 @@ func ContextMiddleware() gin.HandlerFunc {
 
 		body, err := c.GetRawData()
 		if err != nil {
-			webx.FailWithStatus(c, errs.RequestTooLarge("请求体读取失败或超过大小限制"))
+			// 只有确实是 MaxBodyBytes 触发的 *http.MaxBytesError 才回 413；客户端中途断开、
+			// 网络读错误等其它情况回 400，否则监控里的 413 会把两种完全不同的问题混在一起。
+			if _, isTooLarge := errors.AsType[*http.MaxBytesError](err); isTooLarge {
+				webx.FailWithStatus(c, errs.RequestTooLarge("请求体超过大小限制"))
+			} else {
+				webx.FailWithStatus(c, errs.Wrap(errs.CodeInvalidParams, err, "请求体读取失败"))
+			}
 			c.Abort()
 			return
 		}
@@ -37,7 +45,7 @@ func ContextMiddleware() gin.HandlerFunc {
 		// 复用上游已有的请求 ID，否则自行生成，并写入响应头。
 		requestID := c.GetHeader(RequestIDHeader)
 		if requestID == "" {
-			requestID = uuid.NewString()
+			requestID = uuid.New().String()
 		}
 		c.Writer.Header().Set(RequestIDHeader, requestID)
 

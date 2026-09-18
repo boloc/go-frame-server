@@ -68,7 +68,8 @@ func WithClusterDialTimeout(dialTimeout time.Duration) RedisClusterOption {
 	}
 }
 
-// WithClusterRouteRandomly 设置集群是否随机路由
+// WithClusterRouteRandomly 设置集群是否随机路由。默认 false。
+// 开启会隐式打开 ReadOnly，把只读命令路由到从节点，幂等/限流这类 SET 后立刻 GET 的场景会读到滞后数据，除非明确知道在做什么否则保持 false。
 func WithClusterRouteRandomly(routeRandomly bool) RedisClusterOption {
 	return func(r *RedisClusterComponent) {
 		r.config.RouteRandomly = routeRandomly
@@ -138,8 +139,10 @@ func NewRedisClusterComponent(opts ...RedisClusterOption) *RedisClusterComponent
 		config: &redis.ClusterOptions{
 			ReadTimeout:  5 * time.Second,
 			WriteTimeout: 5 * time.Second,
-			PoolSize:     10,
-			MinIdleConns: 10,
+			// PoolSize=32 / MinIdleConns=4：150 QPS 量级、PoolTimeout 5s 下 10 条连接容易排队；
+			// MinIdleConns 不应等于 PoolSize，否则永远维持满池且没有突发余量。
+			PoolSize:     32,
+			MinIdleConns: 4,
 			MaxRetries:   3,
 			PoolTimeout:  5 * time.Second,
 		},
@@ -156,6 +159,7 @@ func NewRedisClusterComponent(opts ...RedisClusterOption) *RedisClusterComponent
 
 // Start 启动 Redis 集群组件：Ping 成功后发布为全局实例。初次连接失败会按 connectRetry 重试。
 func (r *RedisClusterComponent) Start(ctx context.Context) error {
+	setRedisLoggerOnce()
 	var client *redis.ClusterClient
 	err := retryConnect(ctx, r.connectRetryAttempts, r.connectRetryInterval, func() error {
 		c := redis.NewClusterClient(r.config)

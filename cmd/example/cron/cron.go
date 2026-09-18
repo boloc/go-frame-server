@@ -29,10 +29,14 @@ var Component = cron.NewComponent("example",
 		Run:      minuteMarker,
 	},
 	cron.Task{
-		Name:     "report-low-stock",
-		Schedule: "0 */5 * * * *", // 每 5 分钟检查一次库存
-		Run:      repository.DefaultOrderRepository().ReportLowStock,
+		Name:      "report-low-stock",
+		Schedule:  "0 */5 * * * *", // 每 5 分钟检查一次库存
+		Exclusive: true,            // 多副本时抢 Redis 锁（cron:lock:example:report-low-stock）；抢不到 skipped，不告警
+		LockTTL:   2 * time.Minute, // 必须大于单次最长执行时间；没有自动续租
+		Run:       repository.DefaultOrderRepository().ReportLowStock,
 	},
+	// heartbeat / minute-marker 保持非互斥，每个副本都会执行，作为 Exclusive 的对照。
+	// Exclusive 任务 Redis 不可用时宁可漏跑一轮（skipped + Warn + alert），也不要多副本同时跑。
 )
 
 func heartbeat(ctx context.Context) error {
@@ -46,7 +50,9 @@ func minuteMarker(ctx context.Context) error {
 }
 
 // TaskListHandler 返回已注册任务（名称+调度表达式）。
-// GET /api/cron/tasks
+//
+//	GET /api/cron/tasks
+//	curl localhost:10006/api/cron/tasks
 func TaskListHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		webx.Success(c, Component.Tasks())

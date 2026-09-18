@@ -241,7 +241,7 @@ func (c *ClickHouseComponent) Start(ctx context.Context) error {
 	// 设置调试模式
 	if c.config.Debug {
 		options.Debug = true
-		options.Debugf = func(format string, v ...interface{}) { // 打印SQL(只有当Debug为true时，才会执行)
+		options.Debugf = func(format string, v ...any) { // 打印SQL(只有当Debug为true时，才会执行)
 			msg := fmt.Sprintf(format, v...)
 			if strings.Contains(msg, "send query") {
 				// 使用ANSI颜色代码：绿色文本
@@ -305,24 +305,49 @@ func (c *ClickHouseComponent) GetConn() driver.Conn {
 	return c.conn
 }
 
-// GetDefaultClickHouse 获取默认 ClickHouse 连接；未初始化时 panic。
-func GetDefaultClickHouse() driver.Conn {
-	if DefaultClickHouse == nil {
-		panic("default ClickHouse instance not initialized")
+// TryGetDefaultClickHouse 获取默认 ClickHouse 原生连接；未注册或当前未连接时返回 (nil, false)。
+// ClickHouse 通常是可选依赖（clickhouse.enabled=false 时不会注册），业务代码应优先用这个版本。
+func TryGetDefaultClickHouse() (driver.Conn, bool) {
+	clickhouseMu.RLock()
+	instance := DefaultClickHouse
+	clickhouseMu.RUnlock()
+
+	if instance == nil {
+		return nil, false
 	}
-	return DefaultClickHouse.GetConn()
+	conn := instance.GetConn()
+	return conn, conn != nil
 }
 
-// GetClickHouse 获取指定名称的 ClickHouse 连接；不存在时 panic。
-func GetClickHouse(name string) driver.Conn {
+// GetDefaultClickHouse 获取默认 ClickHouse 连接；未初始化时 panic。可选依赖请用 TryGetDefaultClickHouse。
+func GetDefaultClickHouse() driver.Conn {
+	conn, ok := TryGetDefaultClickHouse()
+	if !ok {
+		panic("default ClickHouse instance not initialized or not currently connected")
+	}
+	return conn
+}
+
+// TryGetClickHouse 获取指定名称的 ClickHouse 原生连接；不存在或当前未连接时返回 (nil, false)。
+func TryGetClickHouse(name string) (driver.Conn, bool) {
 	clickhouseMu.RLock()
 	instance, ok := clickhouseInstances[name]
 	clickhouseMu.RUnlock()
 
 	if !ok {
-		panic(fmt.Sprintf("ClickHouse instance [%s] not found", name))
+		return nil, false
 	}
-	return instance.GetConn()
+	conn := instance.GetConn()
+	return conn, conn != nil
+}
+
+// GetClickHouse 获取指定名称的 ClickHouse 连接；不存在时 panic。可选依赖请用 TryGetClickHouse。
+func GetClickHouse(name string) driver.Conn {
+	conn, ok := TryGetClickHouse(name)
+	if !ok {
+		panic(fmt.Sprintf("ClickHouse instance [%s] not found or not currently connected", name))
+	}
+	return conn
 }
 
 // GetClickHouseComponent 获取指定名称的 ClickHouse 组件；不存在时 panic。

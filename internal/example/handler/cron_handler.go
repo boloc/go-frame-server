@@ -7,7 +7,9 @@ import (
 )
 
 // CronManualReportLowStock 手动立即执行一次库存检查，直接调用任务背后的同一方法。
-// POST /api/cron/report-low-stock
+//
+//	POST /api/cron/report-low-stock
+//	curl -X POST localhost:10006/api/cron/report-low-stock
 func CronManualReportLowStock(c *gin.Context) {
 	if err := repository.DefaultOrderRepository().ReportLowStock(c.Request.Context()); err != nil {
 		webx.Fail(c, err)

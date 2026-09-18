@@ -8,6 +8,7 @@ import (
 
 	"github.com/boloc/go-frame-server/pkg/alert"
 	"github.com/boloc/go-frame-server/pkg/errs"
+	"github.com/boloc/go-frame-server/pkg/frame/reqctx"
 	"github.com/boloc/go-frame-server/pkg/frame/validate"
 	"github.com/boloc/go-frame-server/pkg/logger"
 	"github.com/gin-gonic/gin"
@@ -28,6 +29,22 @@ func SetOnFail(fn func(route string, err *errs.Error)) {
 // IncludeCallerInResponse 为 true 时把 Caller 写入响应体，默认 false。
 var IncludeCallerInResponse atomic.Bool
 
+// BizCodeKey 是 gin.Context 里存放业务码的 key，供 AccessLog / HTTPMetrics 在写完响应后读取。
+const BizCodeKey = "webx.biz_code"
+
+// BizCode 读取本次请求已经写出的业务码。未走 Success/Fail 时 ok=false。
+func BizCode(c *gin.Context) (errs.Code, bool) {
+	v, ok := c.Get(BizCodeKey)
+	if !ok {
+		return 0, false
+	}
+	code, ok := v.(errs.Code)
+	if !ok {
+		return 0, false
+	}
+	return code, true
+}
+
 // Response 统一响应体。
 type Response struct {
 	Code    errs.Code         `json:"code"`
@@ -39,6 +56,7 @@ type Response struct {
 
 // Success 成功响应，固定 HTTP 200 + Code=0。
 func Success(c *gin.Context, data any) {
+	c.Set(BizCodeKey, errs.CodeOK)
 	c.JSON(http.StatusOK, Response{Code: errs.CodeOK, Message: "success", Data: data})
 }
 
@@ -62,6 +80,7 @@ func FailWithStatus(c *gin.Context, err error) {
 }
 
 func respond(c *gin.Context, e *errs.Error, status int) {
+	c.Set(BizCodeKey, e.Code)
 	logFailure(c, e)
 
 	if hook := onFailHook.Load(); hook != nil {
@@ -80,12 +99,16 @@ func respond(c *gin.Context, e *errs.Error, status int) {
 }
 
 func logFailure(c *gin.Context, e *errs.Error) {
+	// RequestID 来自 reqctx.FromGin：没有经过 ContextMiddleware 的路由（比如手写的
+	// pprof/debug 路由）这里会是空字符串，不会 panic，也不会影响其它字段。
+	// 补这个字段是为了让并发请求交织在一起的日志能按 X-Request-Id 串联起来定位到具体某一次请求。
 	fields := []zap.Field{
 		zap.Int("code", int(e.Code)),
 		zap.String("message", e.Message),
 		zap.String("caller", e.Caller),
 		zap.String("route", c.FullPath()),
 		zap.String("method", c.Request.Method),
+		zap.String("request_id", reqctx.FromGin(c).RequestID),
 	}
 	if e.Err != nil {
 		fields = append(fields, zap.Error(e.Err))
@@ -138,8 +161,7 @@ func runValidate(req any) error {
 
 	if v, ok := req.(validate.Validatable); ok {
 		if err := v.Validate(); err != nil {
-			var e *errs.Error
-			if errors.As(err, &e) {
+			if e, ok := errors.AsType[*errs.Error](err); ok {
 				return e
 			}
 			return errs.InvalidParams(err.Error())

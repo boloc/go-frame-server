@@ -3,6 +3,7 @@ package options
 
 import (
 	"cmp"
+	"maps"
 	"sort"
 )
 
@@ -50,9 +51,7 @@ func (b *Builder[K, V]) Get(value K) (V, bool) {
 // Map 返回可安全修改的 map 副本，修改不影响 Builder 内部状态。
 func (b *Builder[K, V]) Map() map[K]V {
 	out := make(map[K]V, len(b.index))
-	for k, v := range b.index {
-		out[k] = v
-	}
+	maps.Copy(out, b.index)
 	return out
 }
 

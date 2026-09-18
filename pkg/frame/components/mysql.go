@@ -9,8 +9,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/boloc/go-frame-server/pkg/alert"
 	"github.com/boloc/go-frame-server/pkg/constant"
+	flog "github.com/boloc/go-frame-server/pkg/logger"
 
+	"go.uber.org/zap"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -18,8 +21,9 @@ import (
 )
 
 // MySQLConfig MySQL配置。
-// MasterDSN/SlavesDSN 在 Start 时连一次后固定；主从切换需由 VIP/Proxy 等基础设施完成。
-// 若 DSN 写物理 IP，主库漂移后需改配置并 SIGHUP 热重启。
+// MasterDSN/SlavesDSN 在构造时固定；主从切换需由 VIP/Proxy/DNS 等基础设施完成。
+// 注意 SIGHUP 热重启只是对同一份配置 Stop 再 Start，不会重新读配置文件，改了 DSN 必须
+// 重启进程才生效。
 type MySQLConfig struct {
 	MasterDSN       string
 	SlavesDSN       []string // 支持多个从库
@@ -28,22 +32,35 @@ type MySQLConfig struct {
 	ConnMaxLifetime time.Duration
 	// ConnMaxIdleTime 空闲超过该时间后从池中剔除。默认应明显小于 MySQL wait_timeout。
 	ConnMaxIdleTime time.Duration
-	LogLevel        logger.LogLevel
-	Prefix          string
+	// LogLevel GORM 日志级别。SQL 日志经 pkg/logger（zap）落地，见 newGormLogger。
+	LogLevel logger.LogLevel
+	// SlowThreshold 慢查询阈值，超过即以 Warn 记录（任何 LogLevel >= Warn 时生效），默认 200ms。
+	SlowThreshold time.Duration
+	Prefix        string
 
 	// ConnectRetryAttempts 启动时连接失败的重试次数（含第一次尝试），默认 3。
 	ConnectRetryAttempts int
 	// ConnectRetryInterval 每次重试之间的等待时间，默认 2s。
 	ConnectRetryInterval time.Duration
+
+	// SkipDefaultTransaction 控制是否关闭 GORM 对单条 Create/Update/Delete 的隐式事务包装。
+	// 默认 true（关闭）：单语句写操作不会再多付一次 BEGIN/COMMIT 往返，也不会在网络抖动/
+	// 超时时出现"驱动内部已结束事务，GORM defer 又二次 commit/rollback"这种误导性报错。
+	// 跨语句的原子性要求必须显式 db.Transaction(...)，不受这个默认值影响。
+	// 显式传 false 可以恢复 GORM 原生行为（依赖"带关联的 Create 失败自动回滚"这类语义时使用）。
+	SkipDefaultTransaction *bool
 }
 
 // applyDefaults 设置默认值
 func (c *MySQLConfig) applyDefaults() {
 	if c.MaxIdleConns == 0 {
-		c.MaxIdleConns = 10
+		// 25/50 而不是等比例调大：MaxIdleConns 应该对齐稳态并发量级，MaxOpenConns 是
+		// 信号量式的硬顶，不是吞吐量旋钮；1:10 的旧比例（10/100）会导致并发峰值过后归还连接
+		// 时大量被直接关闭（MaxIdleClosed 指标飙升），下一波并发又要重新建连。
+		c.MaxIdleConns = 25
 	}
 	if c.MaxOpenConns == 0 {
-		c.MaxOpenConns = 100
+		c.MaxOpenConns = 50
 	}
 	if c.ConnMaxLifetime == 0 {
 		c.ConnMaxLifetime = time.Hour
@@ -54,11 +71,18 @@ func (c *MySQLConfig) applyDefaults() {
 	if c.LogLevel == 0 {
 		c.LogLevel = logger.Info
 	}
+	if c.SlowThreshold == 0 {
+		c.SlowThreshold = defaultSlowThreshold
+	}
 	if c.ConnectRetryAttempts == 0 {
 		c.ConnectRetryAttempts = 3
 	}
 	if c.ConnectRetryInterval == 0 {
 		c.ConnectRetryInterval = 2 * time.Second
+	}
+	if c.SkipDefaultTransaction == nil {
+		skip := true
+		c.SkipDefaultTransaction = &skip
 	}
 }
 
@@ -85,7 +109,7 @@ type MySQLComponent struct {
 	master   *gorm.DB
 	replicas []*gorm.DB
 	config   *MySQLConfig
-	current  uint32 // 使用 uint32 配合 atomic
+	current  atomic.Uint32 // 使用 uint32 配合 atomic
 	mu       sync.RWMutex
 }
 
@@ -130,10 +154,17 @@ func (m *MySQLComponent) Start(ctx context.Context) error {
 	m.master = master
 
 	var replicas []*gorm.DB
-	for _, slaveDSN := range m.config.SlavesDSN {
+	for i, slaveDSN := range m.config.SlavesDSN {
 		replica, err := m.connectWithRetry(ctx, slaveDSN)
 		if err != nil {
-			fmt.Printf("[mysql] 警告：从库连接失败，跳过该从库继续启动: dsn=%s err=%v\n", maskDSN(slaveDSN), err)
+			// 从库连不上不阻断启动（读会回落到主库），但必须走正式日志 + 告警：
+			// 否则这个降级只在 stdout 里一闪而过，线上主库负载翻倍却没人知道原因。
+			flog.Warn("mysql: 从库连接失败，跳过该从库继续启动，读请求将回落到主库",
+				zap.Int("slave_index", i), zap.String("dsn", maskDSN(slaveDSN)), zap.Error(err))
+			alert.Notify(ctx, alert.Event{
+				Scope: "mysql", Name: "slave_connect", Message: "slave connect failed, skipped", Err: err,
+				Fields: map[string]any{"slave_index": i, "dsn": maskDSN(slaveDSN)},
+			})
 			continue
 		}
 		replicas = append(replicas, replica)
@@ -148,7 +179,7 @@ func (m *MySQLComponent) connectWithRetry(ctx context.Context, dsn string) (*gor
 	var db *gorm.DB
 	err := retryConnect(ctx, m.config.ConnectRetryAttempts, m.config.ConnectRetryInterval, func() error {
 		var connectErr error
-		db, connectErr = m.connectDB(dsn)
+		db, connectErr = m.connectDB(ctx, dsn)
 		return connectErr
 	})
 	if err != nil {
@@ -158,9 +189,10 @@ func (m *MySQLComponent) connectWithRetry(ctx context.Context, dsn string) (*gor
 }
 
 // connectDB 连接数据库
-func (m *MySQLComponent) connectDB(dsn string) (*gorm.DB, error) {
+func (m *MySQLComponent) connectDB(ctx context.Context, dsn string) (*gorm.DB, error) {
 	gormConfig := &gorm.Config{
-		Logger: logger.Default.LogMode(m.config.LogLevel),
+		Logger:                 newGormLogger("mysql", m.config.LogLevel, m.config.SlowThreshold),
+		SkipDefaultTransaction: m.config.SkipDefaultTransaction == nil || *m.config.SkipDefaultTransaction,
 	}
 
 	// 判断是否需要前缀
@@ -185,7 +217,8 @@ func (m *MySQLComponent) connectDB(dsn string) (*gorm.DB, error) {
 	sqlDB.SetConnMaxLifetime(m.config.ConnMaxLifetime)
 	sqlDB.SetConnMaxIdleTime(m.config.ConnMaxIdleTime)
 
-	if err := sqlDB.Ping(); err != nil {
+	// 带 ctx 的 Ping：Frame 启动被取消时能立刻退出，不等驱动自己的超时。
+	if err := sqlDB.PingContext(ctx); err != nil {
 		_ = sqlDB.Close()
 		return nil, err
 	}
@@ -236,7 +269,7 @@ func (m *MySQLComponent) Slave() *gorm.DB {
 		return master // 返回主库
 	}
 
-	n := atomic.AddUint32(&m.current, 1)
+	n := m.current.Add(1)
 	return replicas[n%uint32(len(replicas))]
 }
 
@@ -274,7 +307,7 @@ func maskDSN(dsn string) string {
 
 // ==================== 默认实例访问方法 ====================
 //
-// panic 版访问器适合启动阶段；运行时请用对应的 Try 版本。
+// panic 版访问器适合启动阶段；健康检查/可选依赖请用对应的 Try 版本。
 //
 // 下面这一组 Try* 的 ok 语义是"这个连接现在能不能用"，不是"这个名字有没有被注册过"：
 // 组件被 Stop() 之后，实例还在全局注册表里，但 Master()/Slave() 会返回 nil，这里多判
@@ -293,7 +326,7 @@ func TryDefaultMasterDB() (*gorm.DB, bool) {
 	return db, db != nil
 }
 
-// DefaultMasterDB 获取默认实例的主库连接；未注册或当前不可用时 panic。运行时请用 TryDefaultMasterDB。
+// DefaultMasterDB 获取默认实例的主库连接；未注册或当前不可用时 panic。健康检查/可选依赖请用 TryDefaultMasterDB。
 func DefaultMasterDB() *gorm.DB {
 	db, ok := TryDefaultMasterDB()
 	if !ok {
@@ -315,7 +348,7 @@ func TryDefaultSlaveDB() (*gorm.DB, bool) {
 	return db, db != nil
 }
 
-// DefaultSlaveDB 获取默认实例的从库连接；未注册或当前不可用时 panic。运行时请用 TryDefaultSlaveDB。
+// DefaultSlaveDB 获取默认实例的从库连接；未注册或当前不可用时 panic。健康检查/可选依赖请用 TryDefaultSlaveDB。
 func DefaultSlaveDB() *gorm.DB {
 	db, ok := TryDefaultSlaveDB()
 	if !ok {
@@ -336,7 +369,7 @@ func TryMasterDB(name string) (*gorm.DB, bool) {
 	return db, db != nil
 }
 
-// MasterDB 获取指定实例的主库连接；实例不存在或当前不可用时 panic。运行时请用 TryMasterDB。
+// MasterDB 获取指定实例的主库连接；实例不存在或当前不可用时 panic。健康检查/可选依赖请用 TryMasterDB。
 func MasterDB(name string) *gorm.DB {
 	db, ok := TryMasterDB(name)
 	if !ok {
@@ -355,7 +388,7 @@ func TrySlaveDB(name string) (*gorm.DB, bool) {
 	return db, db != nil
 }
 
-// SlaveDB 获取指定实例的从库连接；实例不存在或当前不可用时 panic。运行时请用 TrySlaveDB。
+// SlaveDB 获取指定实例的从库连接；实例不存在或当前不可用时 panic。健康检查/可选依赖请用 TrySlaveDB。
 func SlaveDB(name string) *gorm.DB {
 	db, ok := TrySlaveDB(name)
 	if !ok {
@@ -372,7 +405,7 @@ func TryGetMySQLComponent(name string) (*MySQLComponent, bool) {
 	return instance, ok
 }
 
-// GetMySQLComponent 获取指定MySQL组件实例；不存在时 panic。运行时请用 TryGetMySQLComponent。
+// GetMySQLComponent 获取指定MySQL组件实例；不存在时 panic。健康检查/可选依赖请用 TryGetMySQLComponent。
 func GetMySQLComponent(name string) *MySQLComponent {
 	instance, ok := TryGetMySQLComponent(name)
 	if !ok {

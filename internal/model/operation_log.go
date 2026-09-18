@@ -12,7 +12,6 @@ type OperationLog struct {
 	CreatedAt  time.Time `gorm:"not null"`
 }
 
-// TableName 显式指定表名。
-func (OperationLog) TableName() string {
-	return "operation_logs"
-}
+// 表名由 GORM 默认命名策略生成（operation_logs），并自动带上该实例在配置里的 prefix
+// （database.<name>.prefix）。不要在这里实现 TableName()：显式返回固定表名会绕过
+// NamingStrategy，配置里的 prefix 就静默失效了。

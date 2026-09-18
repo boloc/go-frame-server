@@ -1,4 +1,10 @@
-// Package healthcheck 提供 /health 处理器：短 TTL 缓存结果，每个依赖单独超时。
+// Package healthcheck 提供进程存活（liveness）与依赖就绪（readiness）检查。
+//
+// Handler 是 readiness 语义：检查 MySQL/Redis 等依赖，结果短 TTL 缓存，每个依赖单独超时。
+// 把它接到 k8s readinessProbe——依赖挂了摘流量。不要把 Handler 接到 livenessProbe 上，
+// 否则 Redis 一挂所有 Pod 会被循环重启。
+//
+// Liveness 只表示进程还活着，不检查任何依赖、不做缓存，接到 livenessProbe。
 package healthcheck
 
 import (
@@ -10,6 +16,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
 )
 
@@ -53,12 +60,25 @@ type cachedResult struct {
 	checks    map[string]checkResult
 }
 
-// Handler 返回一个可以直接注册到 gin 的健康检查处理器。
+// Liveness 返回进程存活探针：进程活着就 200 {"status":"ok"}，不检查任何依赖，不做缓存。
+// 接到 k8s livenessProbe（/livez）。不要用 Handler 充当 liveness。
+func Liveness() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	}
+}
+
+// Handler 返回 readiness 探针：检查依赖连通性，结果短 TTL 缓存。
+// 接到 k8s readinessProbe（/readyz、/health）。不要把它接到 livenessProbe 上，
+// 否则 Redis 一挂所有 Pod 会被循环重启。
 //
-//	r.GET("/health", healthcheck.Handler([]healthcheck.Dependency{
+//	readyz := healthcheck.Handler([]healthcheck.Dependency{
 //	    {Name: "mysql", Critical: true, Check: healthcheck.MySQLChecker(frame.TryDefaultDB)},
 //	    {Name: "redis", Critical: true, Check: healthcheck.RedisChecker(frame.TryGetRedisCmdable)},
-//	}))
+//	})
+//	r.GET("/health", readyz)
+//	r.GET("/readyz", readyz)
+//	r.GET("/livez", healthcheck.Liveness())
 func Handler(deps []Dependency, opts ...func(*Options)) gin.HandlerFunc {
 	o := &Options{PerCheckTimeout: time.Second, CacheTTL: 10 * time.Second}
 	for _, opt := range opts {
@@ -66,6 +86,7 @@ func Handler(deps []Dependency, opts ...func(*Options)) gin.HandlerFunc {
 	}
 
 	var last atomic.Pointer[cachedResult]
+	var sf singleflight.Group
 
 	return func(c *gin.Context) {
 		if cached := last.Load(); cached != nil && time.Now().Before(cached.expiresAt) {
@@ -73,22 +94,31 @@ func Handler(deps []Dependency, opts ...func(*Options)) gin.HandlerFunc {
 			return
 		}
 
-		checks := make(map[string]checkResult, len(deps))
-		healthy := true
-		for _, dep := range deps {
-			res := runCheck(dep.Check, o.PerCheckTimeout)
-			checks[dep.Name] = res
-			if res.Status == "error" && dep.Critical {
-				healthy = false
+		v, _, _ := sf.Do("readyz", func() (any, error) {
+			if cached := last.Load(); cached != nil && time.Now().Before(cached.expiresAt) {
+				return cached, nil
 			}
-		}
 
-		last.Store(&cachedResult{
-			expiresAt: time.Now().Add(o.CacheTTL),
-			healthy:   healthy,
-			checks:    checks,
+			checks := make(map[string]checkResult, len(deps))
+			healthy := true
+			for _, dep := range deps {
+				res := runCheck(dep.Check, o.PerCheckTimeout)
+				checks[dep.Name] = res
+				if res.Status == "error" && dep.Critical {
+					healthy = false
+				}
+			}
+
+			result := &cachedResult{
+				expiresAt: time.Now().Add(o.CacheTTL),
+				healthy:   healthy,
+				checks:    checks,
+			}
+			last.Store(result)
+			return result, nil
 		})
-		writeResponse(c, healthy, checks)
+		cached := v.(*cachedResult)
+		writeResponse(c, cached.healthy, cached.checks)
 	}
 }
 

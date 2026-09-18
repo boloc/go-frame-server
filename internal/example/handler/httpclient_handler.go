@@ -20,20 +20,22 @@ import (
 // flakyBackend 起一个前 failTimes 次返回 500、之后返回 200 的测试后端，返回 server
 // 和一个能随时读取"总共被访问了多少次"的函数。调用方负责在用完之后 Close server。
 func flakyBackend(failTimes int32) (srv *httptest.Server, hits func() int32) {
-	var attempts int32
+	var attempts atomic.Int32
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if atomic.AddInt32(&attempts, 1) <= failTimes {
+		if attempts.Add(1) <= failTimes {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
 		w.WriteHeader(http.StatusOK)
 	}))
-	return srv, func() int32 { return atomic.LoadInt32(&attempts) }
+	return srv, func() int32 { return attempts.Load() }
 }
 
 // HTTPClientRetryOnIdempotent 演示默认重试策略对幂等方法生效：下游前 2 次返回 500，
 // GET 是幂等方法，客户端会自动重试，第 3 次成功。backend_hits 应该是 3。
-// GET /test/http-client/retry-get
+//
+//	GET /test/http-client/retry-get
+//	curl -H "X-Demo-Token: x" localhost:10006/test/http-client/retry-get
 func HTTPClientRetryOnIdempotent(c *gin.Context) {
 	srv, hits := flakyBackend(2)
 	defer srv.Close()
@@ -56,7 +58,9 @@ func HTTPClientRetryOnIdempotent(c *gin.Context) {
 }
 
 // HTTPClientNoRetryOnPost 演示 POST 默认不重试：backend_hits 应为 1，状态码是下游的 500。
-// GET /test/http-client/no-retry-post
+//
+//	GET /test/http-client/no-retry-post
+//	curl -H "X-Demo-Token: x" localhost:10006/test/http-client/no-retry-post
 func HTTPClientNoRetryOnPost(c *gin.Context) {
 	srv, hits := flakyBackend(2)
 	defer srv.Close()
@@ -71,7 +75,9 @@ func HTTPClientNoRetryOnPost(c *gin.Context) {
 }
 
 // HTTPClientRetryAllowNonIdempotent 演示显式放开非幂等重试后，POST 也会重试到成功。
-// GET /test/http-client/retry-post-allowed
+//
+//	GET /test/http-client/retry-post-allowed
+//	curl -H "X-Demo-Token: x" localhost:10006/test/http-client/retry-post-allowed
 func HTTPClientRetryAllowNonIdempotent(c *gin.Context) {
 	srv, hits := flakyBackend(2)
 	defer srv.Close()
@@ -94,7 +100,9 @@ func HTTPClientRetryAllowNonIdempotent(c *gin.Context) {
 }
 
 // HTTPClientNamedTimeout 演示按 name 隔离超时：短超时客户端先失败，默认客户端能等到 200。
-// GET /test/http-client/named-timeout
+//
+//	GET /test/http-client/named-timeout
+//	curl -H "X-Demo-Token: x" localhost:10006/test/http-client/named-timeout
 func HTTPClientNamedTimeout(c *gin.Context) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(150 * time.Millisecond)

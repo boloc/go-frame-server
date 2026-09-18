@@ -1,9 +1,12 @@
 # HTTP 接口命名与分层规范
 
-> 目的：把已经在 `docs/framework-writing-and-improvement.md` 里讨论、验证过的几条约定，
-> 提炼成一份团队里任何人都能照抄的"规范"文档，而不用去翻改进文档的调研过程。
-> 范围：只讲"命名/分层/校验"这几条容易被新人无意打破的约定；架构层面的权衡过程仍以
-> `docs/framework-writing-and-improvement.md` 为准。
+> 目的：一份团队里任何人都能照抄的规范。
+> 范围：只讲命名 / 分层 / 校验这些容易被新人无意打破的约定。
+> 怎么启动和 curl：[`docs/dev-commands.md`](dev-commands.md)。
+> HTTP 字段和错误码：[`docs/example-apifox.openapi.json`](example-apifox.openapi.json)。
+> 框架总览：[`README.md`](../README.md)。
+
+路径以 `cmd/example/route` 为准。产品列表是 `GET /api/products/list`，不是 `GET /api/products`。公告 key 是 `product.notice`，不是 `product_notice`。
 
 ---
 
@@ -14,10 +17,10 @@
 - handler 是**包级函数**，不是某个 `XxxHandler` 结构体的方法；函数体内部 `logic.NewXxxLogic()` 现场 new，不做构造注入。
 - 函数名格式固定为 `{Resource}{Action}`，例如 `ProductList`、`ProductCreate`、`OrderCreate`、`OrderRefund`、`SystemConfigGetByKey`。
 - **禁止**使用通用 CRUD 名字（`List`/`Add`/`Update`/`Delete`）作为函数名或方法名——包级函数场景下会撞名，而且丢失业务语义（`Update` 不知道改的是什么，`OrderRefund` 一眼能看出是退款动作，出问题查日志/监控时更快定位）。
-- **禁止**为了"看起来更 OOP"引入 `ProductHandler{}.List()` 这种 struct 方法 + 构造注入的写法，这条路线已经在 `docs/framework-writing-and-improvement.md` 4.11 节验证过收益不明显、成本更高。
+- **禁止**为了"看起来更 OOP"引入 `ProductHandler{}.List()` 这种 struct 方法 + 构造注入的写法：每加一个依赖要同时改 handler 构造函数签名和路由装配代码两个地方，跟"写代码应该循序渐进、不用一开始就想清楚完整依赖链"这条开发体验直接冲突，而 `logic`/`repository` 在这个框架里通常是无状态的薄封装，构造注入换来的可测试性收益并不明显。
 
 ```text
-route      r.GET("/api/products", handler.ProductList)
+route      products.GET("list", handler.ProductList)  // 完整路径 GET /api/products/list
 handler    func ProductList(c *gin.Context) { ... logic.NewProductLogic().GetList(&req) ... }
 ```
 
@@ -47,17 +50,23 @@ type ProductListReq struct {
 }
 ```
 
-**这条规则配套了一个检查脚本**，见第 4 节。
+**这条规则配套了 AST 检查**，见第 4 节。
 
 ### 2.1 dto 不实现 `validate.Validatable`，跨字段规则一律放 `validation` 包
 
-`pkg/frame/validate` 除了 tag 校验，还提供了一个 `Validatable` 接口（`Validate() error`），dto 实现它之后会被 `webx.Bind` 系列**自动**调用（不需要 handler 显式写调用点）。
+`pkg/frame/validate` 除了 tag 校验，还提供了一个 `Validatable` 接口（`Validate() error`），请求结构体实现它之后会被 `webx.Bind` 系列**自动**调用（不需要 handler 显式写调用点）。框架能力演示见 `POST /test/validatable`（结构体活在 handler 文件里，**不**在 `dto` 包）。
 
-**项目约定：dto 不实现这个接口。** 原因：
+**项目约定：业务 dto 不实现这个接口。** 原因：
 
 - 校验分两层是为了"职责明确"——tag 是纯声明式的字段格式校验（自动执行，不需要写代码逻辑）；跨字段/业务规则应该有一个统一、显式、可单独单测的落脚点。
 - 如果 dto 里再实现 `Validate()`，会出现"tag 之外还有一层校验，也在绑定阶段自动跑，但代码却混在 dto 文件里"的模糊地带——校验逻辑到底该去 dto 里的 `Validate()` 找，还是去 `validation` 包找，团队里会有人记不住。
-- `internal/example/dto/order_dto.go` + `internal/example/validation/order_validation.go` 就是唯二两层职责的真实示例：`OrderCreateReq` 只有 tag，没有 `Validate()`；"该产品是否已下架"这种跨字段/业务规则显式写在 `ValidateOrderCreate`，由 `handler.OrderCreate` 显式调用一次。这是本项目唯一认可的模式。
+- `internal/example/dto/order_dto.go` + `internal/example/validation/order_validation.go` 就是唯二两层职责的真实示例：`OrderCreateReq` 只有 tag，没有 `Validate()`；"该产品是否已下架"这种跨字段/业务规则显式写在 `ValidateOrderCreate`，由 `handler.OrderCreate` 显式调用一次。这是本项目业务接口唯一认可的模式。
+
+| | `validate:` tag | `validate.Validatable` | `internal/<domain>/validation` |
+|---|---|---|---|
+| 谁调用 | `webx.Bind*` 自动 | `webx.Bind*` 在 tag 通过后自动 | handler **显式**调用 |
+| 适合 | 单字段格式 | 框架能力（演示接口可以） | 业务跨字段/运营规则（不查库） |
+| 业务 dto | 必须用 | **禁止** | 必须用这一层 |
 
 ```go
 // dto：只放 tag
@@ -101,22 +110,12 @@ type ProductItem struct { ... }
 
 参考实现：`internal/example/dto/product_dto.go`（`ProductItem.FromModel`）、`internal/example/dto/order_dto.go`。
 
-## 4. 配套检查：自动挡住违规，不靠人记
+## 4. Review 时盯住这两条，不要另发明检查脚本
 
-**权威检查是 `tests/conventions_test.go`**，用 `go/parser` 解析 AST，覆盖第 2 节和第 2.1 节两条规则：
+第 2 节和第 2.1 节没有自动化测试兜底，靠 review 挡住：
 
-- `TestNoBindingTag`：扫描 `internal/`、`pkg/` 下所有 struct tag，发现 `binding:"` 直接报错，精确到文件名+行号。
-- `TestDTOPackagesDoNotImplementValidatable`：扫描 `internal/**/dto` 下所有函数声明，发现 `func (x T) Validate() error` 这种实现了 `validate.Validatable` 的方法直接报错。
-
-跑法：
-
-```bash
-go test ./tests/... -v -run 'TestNoBindingTag|TestDTOPackagesDoNotImplementValidatable'
-```
-
-这两个检查是 `go test ./...` 的一部分，日常跑全量测试就会自动带上，不需要额外记住一个命令；仓库目前还没有 CI 配置，接入时把 `go test ./...` 加进去即可，不需要再单独接这两个测试。
-
-`scripts/check-binding-tag.sh` 仍然保留，作为不想等 Go 编译、只想快速用 grep 预检一下 `binding:` tag 的本地小工具，但它**不覆盖** `Validatable` 这条规则，只是 `TestNoBindingTag` 的一个更轻量、更快但更不精确的子集，权威判断以 Go 测试为准。
+- 请求结构体只用 `validate:` tag，不要写 `binding:`。
+- `internal/**/dto` 不要实现 `func (T) Validate() error`。跨字段规则放 `validation` 包，由 handler 显式调用。
 
 ---
 
@@ -156,7 +155,21 @@ go test ./tests/... -v -run 'TestNoBindingTag|TestDTOPackagesDoNotImplementValid
   ——Redis 故障往往和"客户端疯狂重试"同时发生，这恰好是幂等保护最该生效、也最容易被
   fail-open 悄悄绕过的时刻，宁可这段时间接口不可用，也不能被绕过重复下单/重复支付。
 
-参考实现：`cmd/example/route/route.go` 的 `/api/orders`（用的是 `WithFailOpen(false)`）。
+参考实现：`cmd/example/route/order_route.go` 的 `/api/orders`（`WithRequired(true)` +
+`WithFailOpen(false)` + `WithScopeFunc`）。
+
+### 5.1 幂等键的作用域
+
+默认 Redis key = `KeyPrefix` + 路由 `FullPath` + `:` + 客户端 `Idempotency-Key`。
+
+- 客户端用全局唯一 UUID，或接口没有用户概念时，**不需要** `WithScopeFunc`。
+- 键可能跨用户重复（大家都传 `"1"`），或要防止别人猜键重放响应时，用
+  `idempotency.WithScopeFunc` 把用户标识拼进 key：
+  `KeyPrefix + FullPath + ":" + scope + ":" + 幂等键`。`ScopeFunc` 返回空字符串时
+  key 格式不变。
+
+示例用 `X-Demo-Token` 当演示用户：同一 token + 同一 `Idempotency-Key` 重放；换 token
+同 key 互不干扰。见 `cmd/example/route/order_route.go` 顶部的两条 curl。
 
 ## 6. 限流：Redis 不可用时的降级策略同样必须显式选择
 
@@ -176,7 +189,7 @@ go test ./tests/... -v -run 'TestNoBindingTag|TestDTOPackagesDoNotImplementValid
   退避逻辑识别的信号，这些组件普遍认 HTTP 状态码，不会去解析业务响应体里的 `code`。
   如果前端确实只处理 200 + body.code，用 `WithUseRealStatus(false)` 切回 `webx.Fail`。
 
-参考实现：`cmd/example/route/route.go` 的 `/api/products`。
+参考实现：`cmd/example/route/product_route.go` 的 `/api/products` 组。中间件挂在组上，默认 Redis key 是 `ratelimit:` + 路由 `FullPath` + `:` + ClientIP（`pkg/frame/ratelimit` 的 `defaultKeyFunc`），所以 `/list`、`/summary`、`/:id` 各自 10 次/分钟，不是整组共用一个桶。
 
 ## 7. 定时任务：任务只负责"业务逻辑"，调度相关的关注点都交给 `pkg/frame/cron`
 
@@ -211,10 +224,10 @@ go test ./tests/... -v -run 'TestNoBindingTag|TestDTOPackagesDoNotImplementValid
   一个副本/一个单独的 worker 角色跑定时任务）。这条决策放在 bootstrap 层（读配置，决定
   要不要调用 `RegisterSingleton`），不要下沉进 `pkg/frame/cron` 本身——`cron.Component`
   不应该知道"配置"这个概念，跟 MySQL/Redis 组件本身不关心业务配置格式是同一个原则。
-  默认值必须是"没配置这一项就维持原来的行为"（默认启用），只有显式配成 `false` 才关闭，
-  用 `viper.IsSet` 判断"有没有配置"而不是直接读 `GetBool` 的结果，否则"没配置"和
-  "显式配成 false"会被误判成同一种情况。参考实现：`cmd/example/bootstrap/cron.go` 的
-  `cronEnabled`/`SetupCron`，配置项见 `config/frame-server.yml` 的 `cron.enabled`。
+  默认启用：只有显式配成 `false` 才关闭。用 `viper.IsSet` 判断"有没有配置"而不是直接
+  读 `GetBool` 的结果，否则"没配置"和"显式配成 false"会被误判成同一种情况。参考实现：
+  `cmd/example/bootstrap/cron.go` 的 `cronEnabled`/`SetupCron`，配置项见
+  `config/frame-server.yml` 的 `cron.enabled`。
 
 参考实现：`cmd/example/cron/cron.go`（任务列表单例）+ `cmd/example/bootstrap/cron.go`
 （注册进 Frame）。任务列表单例放在 `cmd/example/cron` 而不是 `internal/example`：它的
@@ -233,10 +246,22 @@ repository/logic 方法——`Task.Run` 本来就是一个独立可调用的方�
 是"接线内省 vs 业务逻辑"两种不同职责的自然结果。参考路由：
 `GET /api/cron/tasks` + `POST /api/cron/report-low-stock`。
 
+### 7.1 `Exclusive`：多副本下同一时刻只跑一次
+
+需要「全局只跑一次」的任务设 `Task.Exclusive: true`（示例：`report-low-stock`），
+执行前抢 Redis 锁（`cron:lock:<scheduler>:<task>`，`SET NX PX`）。抢不到记
+`status=skipped`，打 Info，不告警。`LockTTL` 必须大于单次最长执行时间，没有自动续租。
+
+Exclusive 任务通常不幂等：Redis 不可用时宁可漏跑一轮（skipped + Warn + alert），
+也不要多副本同时跑。每个副本都该跑的任务（心跳、本机探活）保持 `Exclusive: false`，
+示例里 `heartbeat` / `minute-marker` 就是对照。
+
+不要再在 `Run` 里自己套一层 Redis 锁——框架已经做了。要不要跑整个调度器仍由
+`cron.enabled` 在 bootstrap 决定。
+
 ## 8. 中间件顺序：谁必须排在谁前面，为什么
 
-之前这些约束分散写在 `MaxBodyBytes`/`ContextMiddleware`/`GinComponent` 各自的代码注释里，
-这里汇总成一份表，不用再翻好几个文件拼全貌。
+全局中间件与分组中间件的先后顺序如下，业务按本节装配即可。
 
 ### 8.1 `GinComponent` 内置的默认顺序（业务不需要手动排）
 
@@ -245,78 +270,83 @@ repository/logic 方法——`Task.Run` 本来就是一个独立可调用的方�
 
 ```text
 1. gin.Logger()              仅 DebugMode 开启
-2. gin.Recovery()             兜底 panic，防止一个请求的 panic 打垮整个进程
+2. gin.CustomRecoveryWithWriter  兜底 panic，堆栈经 pkg/logger 落地（不用 gin.Recovery，避免只打到 stderr）
 3. middleware.MaxBodyBytes    默认 4MB，WithGinMaxBodyBytes(0) 可关闭
 4. middleware.RequestTimeout  默认关闭，WithGinRequestTimeout(d) 开启
 5. detectUnconfiguredProxy    仅 TrustedProxies 未配置时开启（提醒用，不拦截请求）
 6. WithGinMiddleware(...) 里传入的中间件
 ```
 
-**第 3 步必须排在任何会读整包 body 的中间件之前**（比如第 7 步的 `ContextMiddleware`）：
+**第 3 步必须排在任何会读整包 body 的中间件之前**（比如 8.2 的 `ContextMiddleware`）：
 `MaxBodyBytes` 用 `http.MaxBytesReader` 包一层 `c.Request.Body`，如果读 body 的中间件先跑，
 限制形同虚设——`NewGinComponent` 内部的注册顺序已经保证了这一点，业务只有在**脱离
 `GinComponent` 自己拼 `gin.Engine`** 时才需要自己操心这条规则。
 
 ### 8.2 业务在 bootstrap 阶段追加的顺序
 
-```19:32:cmd/example/bootstrap/gin.go
-func SetupGin(f *frame.Frame, conf *config.ConfigComponent, metricsHandlers []gin.HandlerFunc) {
-	ginComponent := components.NewGinComponent(...)
-
-	// 添加全局中间件
-	ginComponent.Use(middleware.ContextMiddleware())
+```71:76:cmd/example/bootstrap/gin.go
+	ginComponent.Use(
+		middleware.ContextMiddleware(),
+		middleware.AccessLog(middleware.WithSlowThreshold(time.Second)),
+		monitor.HTTPMetrics(),
+	)
 	f.RegisterComponent(ginComponent)
-}
 ```
 
-`ginComponent.Use(...)` 在 `NewGinComponent` **返回之后**才调用，所以 `ContextMiddleware`
-排在上面 8.1 全部六步**之后**——这正好满足"必须排在 `MaxBodyBytes` 之后"的要求。
+`ginComponent.Use(...)` 在 `NewGinComponent` **返回之后**才调用，所以 `ContextMiddleware`、
+`AccessLog`、`HTTPMetrics` 排在上面 8.1 全部六步**之后**——这正好满足"必须排在
+`MaxBodyBytes` 之后"的要求。`AccessLog` 和 `HTTPMetrics` 要读 `ContextMiddleware` 写入的
+`request_id` / `ClientIP`，以及 handler 返回后的 `webx.BizCode`，必须排在
+`ContextMiddleware` 之后、业务路由之前。
 
 **排序结论：**
 
 ```text
-MaxBodyBytes → RequestTimeout → detectUnconfiguredProxy → ContextMiddleware
+MaxBodyBytes → RequestTimeout → detectUnconfiguredProxy → ContextMiddleware → AccessLog → HTTPMetrics
 ```
 
 如果业务还要加别的全局中间件（鉴权、审计日志……），一律用 `ginComponent.Use(...)`
-在 `SetupGin` 里追加，会自然排在 `ContextMiddleware` 之后——**除非这个中间件也需要读
+在 `SetupGin` 里追加，会自然排在上述链之后——**除非这个中间件也需要读
 body**（这种情况很少见，读 body 的需求几乎都应该走 `reqctx.FromGin(c).RequestBody`，
 不需要再读第二次）。
 
 ### 8.3 路由/分组级中间件（`idempotency`/`ratelimit`/业务鉴权……）
 
 这些不挂在 `GinComponent` 全局链上，而是 `r.Group(...).Use(...)`（见
-`cmd/example/route/route.go` 的 `orders`/`products`/`testGroup`）。Gin 的执行顺序是
+`cmd/example/route/order_route.go`、`product_route.go`）。Gin 的执行顺序是
 "全局中间件全部先跑完，再跑命中的分组中间件"，所以**分组中间件天然排在
 `ContextMiddleware` 之后**，不需要业务操心顺序——这也是为什么
 `pkg/frame/ratelimit` 的 `defaultKeyFunc` 敢直接读 `reqctx.FromGin(c).ClientIP`：
 等分组中间件跑到的时候，`ContextMiddleware` 已经把这个字段填好了（即便没填好，
 `defaultKeyFunc` 也有 `c.ClientIP()` 兜底，见 `pkg/frame/ratelimit/ratelimit.go`）。
 
-同一个分组内挂多个中间件时，**先 `.Use()` 的先执行**，例如 `/api/orders` 应该是
-`idempotency.Middleware(...)` 排在鉴权中间件之后（先确认这个请求"是谁"，再判断
-"这个人的这次操作是不是重复提交"）——`internal/example` 目前没有鉴权中间件示例，
-接入时按这个顺序补。
+同一个分组内挂多个中间件时，**先 `.Use()` 的先执行**。`/api/orders` 的顺序是
+`RequireDemoToken` 再 `idempotency.Middleware`（先确认请求"是谁"，再判断这个人的操作
+是否重复提交）。鉴权示例见 `internal/example/middleware/demo_token.go`（`RequireDemoToken`
++ `DemoUser`）；幂等 scope 用 `idempotency.WithScopeFunc` 读取 `DemoUser`，见
+`cmd/example/route/order_route.go`。
 
 ### 8.4 一张总表
 
 | 顺序 | 中间件 | 挂载方式 | 前置要求 |
 |---|---|---|---|
-| 1 | `gin.Logger()` / `gin.Recovery()` | `GinComponent` 内置 | 无 |
+| 1 | `gin.Logger()` / `gin.CustomRecoveryWithWriter` | `GinComponent` 内置 | 无 |
 | 2 | `middleware.MaxBodyBytes` | `GinComponent` 内置 | 必须在任何读 body 的中间件之前 |
 | 3 | `middleware.RequestTimeout` | `GinComponent` 内置 | 无强制要求，建议靠前 |
 | 4 | `detectUnconfiguredProxy` | `GinComponent` 内置 | 无 |
 | 5 | `middleware.ContextMiddleware` | `bootstrap.SetupGin` 显式 `Use` | 必须在 `MaxBodyBytes` 之后 |
-| 6 | 业务鉴权/审计类全局中间件 | `bootstrap.SetupGin` 显式 `Use` | 建议在 `ContextMiddleware` 之后（如果要用 `reqctx`） |
-| 7 | 分组鉴权中间件 | `group.Use(...)` | 建议排在幂等/限流之前 |
-| 8 | `idempotency.Middleware` / `ratelimit.Middleware` | `group.Use(...)` | 依赖 `reqctx.ClientIP`（有兜底），不强制要求 `ContextMiddleware` 已跑 |
+| 6 | `middleware.AccessLog` / `monitor.HTTPMetrics` | `bootstrap.SetupGin` 显式 `Use` | 必须在 `ContextMiddleware` 之后（读 request_id / ClientIP / BizCode） |
+| 7 | 业务鉴权/审计类全局中间件 | `bootstrap.SetupGin` 显式 `Use` | 建议在 `ContextMiddleware` 之后（如果要用 `reqctx`） |
+| 8 | 分组鉴权中间件（示例：`RequireDemoToken`） | `group.Use(...)` | 建议排在幂等/限流之前 |
+| 9 | `idempotency.Middleware` / `ratelimit.Middleware` | `group.Use(...)` | 依赖 `reqctx.ClientIP`（有兜底），不强制要求 `ContextMiddleware` 已跑 |
 
 ## 9. 统一失败通知：`pkg/alert`
 
 **规则：**
 
-- 需要接入外部通知渠道（飞书/企业微信/PagerDuty……）时，在 bootstrap 阶段调用**一次**
-  `alert.SetHook(func(ctx context.Context, e alert.Event) { ... })`，在这一个函数内部
+- 需要接入外部通知渠道（飞书/企业微信/PagerDuty……）时，进程里调用**一次**
+  `alert.SetHook(func(ctx context.Context, e alert.Event) { ... })`（示例在
+  `cmd/example/main.go`，`bootstrap.Setup` 之后、`Run` 之前），在这一个函数内部
   按 `e.Scope` 分发到不同渠道，不要在框架各个子系统里分别接一套通知逻辑。
 - `alert.Notify` 已经接在这些位置，注册一次 Hook 就能全部覆盖：`pkg/frame/frame.go`
   （组件启停失败、`AfterStart`/`BeforeStop` 钩子失败）、`pkg/frame/components/gin.go`
@@ -337,9 +367,9 @@ body**（这种情况很少见，读 body 的需求几乎都应该走 `reqctx.Fr
 
 - 只用于读多写少、允许有界延迟的数据（运营配置、下拉选项、导航栏列表……），**不要**
   用于要求强一致的读写场景（库存扣减之类，请用真实的数据库事务/Redis 原子操作）。
-- `Key`/`Loader`/`RedisInterval`/`MemoryInterval` 必须显式设置，缺一个直接在 `Start`
-  阶段 panic；`MemoryInterval` 通常应该比 `RedisInterval` 短（内存层刷新成本几乎为零，
-  可以刷得更频繁）。
+- `Key`/`Loader`/`RedisInterval`/`MemoryInterval` 必须显式设置，缺一个时 `Start`
+  返回 error（`New` 本身不检查、不 panic）；`MemoryInterval` 通常应该比 `RedisInterval`
+  短（内存层刷新成本几乎为零，可以刷得更频繁）。
 - 多实例部署时用 `Jitter` 给刷新时机加一点随机抖动，避免所有实例在同一个调度边界一起
   打数据源/Redis。
 - `Get()` 优先读内存，只有"从来没有成功加载过"时才会同步兜底调一次 `Loader`——正常运行
@@ -378,10 +408,11 @@ body**（这种情况很少见，读 body 的需求几乎都应该走 `reqctx.Fr
   几行心跳日志），自动迁移哪怕只是"新增列"也是会动生产表结构的操作，不该在没人明确
   决定的情况下默认发生。这也是 nav-market-c 真实生产的做法（`database.is_migrate`
   默认 `false`，只有 admin 服务显式打开）。
-- 实际迁移动作放在 `f.AfterStart(...)` 钩子里执行（`SetupMigration`），不是在
-  `bootstrap.Setup` 阶段——这时候 MySQL 组件已经真正 `Start()` 成功、连接可用；迁移失败
-  会让 `AfterStart` 返回 error，`Frame` 据此回滚已启动的组件，不会出现"迁移失败了，
-  但进程好像还活着"这种状态。
+- 实际迁移动作注册成独立 Component（`SetupMigration`），排在 MySQL `Start` 之后、
+  缓存 `Start` 之前。不要放进 `AfterStart`：缓存预热发生在组件 `Start` 里，AfterStart
+  太晚。迁移失败会让这个 Component 的 `Start` 返回 error，`Frame` 回滚已启动的组件，
+  不会出现"迁移失败了，但进程好像还活着"这种状态。参考
+  `cmd/example/bootstrap/migration.go`。
 - 模型该迁移到哪个命名 MySQL 实例，必须显式声明（`internal/migration/migration.go` 的
   `perInstanceModels`），不能假设所有模型都在同一个库——这个示例项目里
   `model.SystemConfig` 就存在 `config_db`，不是 `default_db`。
@@ -400,7 +431,7 @@ body**（这种情况很少见，读 body 的需求几乎都应该走 `reqctx.Fr
 **结论：**
 
 - **本地/开发环境**：开 `database.auto_migrate: true`，改完 model 直接重启进程就有最新表
-  结构，不需要手写 SQL、不需要额外工具，这个示例项目现在这套就是为这个场景准备的。
+  结构，不需要手写 SQL、不需要额外工具。本示例的 AutoMigrate 就是为这个场景准备的。
 - **生产环境**：不建议依赖 `AutoMigrate`。原因不是"AutoMigrate 有 bug"，是它的能力边界
   本身就不覆盖破坏性变更——一旦需要改列名/改类型/加唯一约束到已有脏数据的表，
   `AutoMigrate` 要么什么都不做（悄悄留下一个孤儿列），要么直接报错，两种结果都不是你想要
@@ -423,16 +454,25 @@ body**（这种情况很少见，读 body 的需求几乎都应该走 `reqctx.Fr
 `GET /api/products/options`。
 
 参考实现：`internal/migration/migration.go`（模型列表 + `AutoMigrate`）+
-`cmd/example/bootstrap/migration.go`（配置开关 + `AfterStart` 钩子）。
+`cmd/example/bootstrap/migration.go`（配置开关 + 迁移 Component）。
 
-## 变更记录
+## 13. 组件访问器：启动期 / 请求期 / 可选依赖
 
-- 2026-08-14：首版，整理自 `ProductList` 命名、`validate` tag、dto 分层三个问题的讨论结论。
-- 2026-08-14：补第 5 节，新增 `pkg/frame/idempotency` 幂等保护中间件的使用规范。
-- 2026-08-14：补第 6、7 节，新增 `pkg/frame/ratelimit` 限流中间件、`pkg/frame/cron` 定时
-  任务组件的使用规范。
-- 2026-08-14：补第 11 节，新增数据库自动迁移（`database.auto_migrate` 开关）+
-  AutoMigrate vs 版本化 SQL 迁移的场景判断。
-- 2026-08-14：补第 8 节，汇总中间件顺序说明。
-- 2026-08-14：补第 9、10 节，新增 `pkg/alert` 统一失败通知、`pkg/frame/refreshcache` 双层刷新
-  只读缓存的使用规范。
+`pkg/frame` 和 `pkg/frame/components` 对 MySQL / Redis / ClickHouse 同时提供 panic 版
+（`DefaultDB`、`MasterDB`、`GetRedisCmdable`……）和 Try 版（`TryDefaultDB`、
+`TryGetRedisCmdable`、`components.TryDefaultClickHouseDB`……）。两套都是故意留下的，
+按依赖是不是「这个进程活着就必须连着」来选，不要在 README 和业务代码里各说一套。
+
+| 场景 | 用哪套 | 为什么 |
+|---|---|---|
+| 启动装配、健康检查、可选组件探测 | `Try*` | 没连上返回 `(nil, false)`，由调用方决定跳过、降级或让 Start 失败 |
+| 请求期 repository / logic，且该依赖是服务运行的前提（本示例的 MySQL） | panic 版 | 服务期连着是不变量；真断了 Gin recover 成 500，比每个方法写 `if !ok` 更吵、更短 |
+| 请求期可选能力（ClickHouse、对象存储、按配置关闭的子系统） | `Try*` | 未启用必须回业务错误，不能 panic。见 `POST /test/clickhouse/events`、`/test/storage/*` |
+
+本示例 `ProductRepository` / `SystemConfigRepository` 用 panic 版取连接，是符合上表
+第二行的：这三个 MySQL 实例启动失败进程不会起来，请求期再判一次 `ok` 没有信息量。
+`AfterStart` 里用 `TryDefaultDB` / `TryGetRedisCmdable` 做一次就绪校验（见
+`cmd/example/main.go`），是第一行。
+
+健康检查必须用 Try：`healthcheck.MySQLChecker(frame.TryDefaultDB)` 这类探测在依赖
+还没起来或已经摘掉时不能把自己 panic 掉。
