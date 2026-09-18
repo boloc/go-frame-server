@@ -5,9 +5,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/boloc/go-frame-server/internal/example/constant"
-	"github.com/boloc/go-frame-server/internal/model"
-	"github.com/boloc/go-frame-server/pkg/frame/components"
+	"github.com/boloc/go-frame-server/v2/internal/example/constant"
+	"github.com/boloc/go-frame-server/v2/internal/model"
+	"github.com/boloc/go-frame-server/v2/pkg/frame/components"
 )
 
 // perInstanceModels 描述每个命名 MySQL 实例要迁移的模型。

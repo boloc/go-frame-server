@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/boloc/go-frame-server/pkg/frame/webx"
+	"github.com/boloc/go-frame-server/v2/pkg/frame/webx"
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"

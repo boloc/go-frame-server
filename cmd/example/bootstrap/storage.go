@@ -3,9 +3,9 @@ package bootstrap
 import (
 	"context"
 
-	"github.com/boloc/go-frame-server/pkg/frame/config"
-	"github.com/boloc/go-frame-server/pkg/frame/storage"
-	"github.com/boloc/go-frame-server/pkg/logger"
+	"github.com/boloc/go-frame-server/v2/pkg/frame/config"
+	"github.com/boloc/go-frame-server/v2/pkg/frame/storage"
+	"github.com/boloc/go-frame-server/v2/pkg/logger"
 )
 
 // SetupStorage 按 storage.r2 配置创建默认的对象存储客户端并注册为进程内默认实例

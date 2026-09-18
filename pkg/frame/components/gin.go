@@ -11,10 +11,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/boloc/go-frame-server/pkg/alert"
-	"github.com/boloc/go-frame-server/pkg/constant"
-	"github.com/boloc/go-frame-server/pkg/frame/middleware"
-	"github.com/boloc/go-frame-server/pkg/logger"
+	"github.com/boloc/go-frame-server/v2/pkg/alert"
+	"github.com/boloc/go-frame-server/v2/pkg/constant"
+	"github.com/boloc/go-frame-server/v2/pkg/frame/middleware"
+	"github.com/boloc/go-frame-server/v2/pkg/logger"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"

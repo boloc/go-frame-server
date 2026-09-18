@@ -2,8 +2,8 @@
 package enum
 
 import (
-	"github.com/boloc/go-frame-server/internal/model"
-	"github.com/boloc/go-frame-server/pkg/util/options"
+	"github.com/boloc/go-frame-server/v2/internal/model"
+	"github.com/boloc/go-frame-server/v2/pkg/util/options"
 )
 
 // ProductStatus 产品状态取值与展示文案，Value 引用 model 层常量。

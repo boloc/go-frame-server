@@ -3,14 +3,14 @@ package handler
 import (
 	"time"
 
-	"github.com/boloc/go-frame-server/pkg/alert"
-	"github.com/boloc/go-frame-server/pkg/errs"
-	"github.com/boloc/go-frame-server/pkg/frame"
-	"github.com/boloc/go-frame-server/pkg/frame/rediskey"
-	"github.com/boloc/go-frame-server/pkg/frame/reqctx"
-	"github.com/boloc/go-frame-server/pkg/frame/webx"
-	"github.com/boloc/go-frame-server/pkg/logger"
-	"github.com/boloc/go-frame-server/pkg/util/maps"
+	"github.com/boloc/go-frame-server/v2/pkg/alert"
+	"github.com/boloc/go-frame-server/v2/pkg/errs"
+	"github.com/boloc/go-frame-server/v2/pkg/frame"
+	"github.com/boloc/go-frame-server/v2/pkg/frame/rediskey"
+	"github.com/boloc/go-frame-server/v2/pkg/frame/reqctx"
+	"github.com/boloc/go-frame-server/v2/pkg/frame/webx"
+	"github.com/boloc/go-frame-server/v2/pkg/logger"
+	"github.com/boloc/go-frame-server/v2/pkg/util/maps"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )

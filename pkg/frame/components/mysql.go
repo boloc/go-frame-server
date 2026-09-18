@@ -9,9 +9,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/boloc/go-frame-server/pkg/alert"
-	"github.com/boloc/go-frame-server/pkg/constant"
-	flog "github.com/boloc/go-frame-server/pkg/logger"
+	"github.com/boloc/go-frame-server/v2/pkg/alert"
+	"github.com/boloc/go-frame-server/v2/pkg/constant"
+	flog "github.com/boloc/go-frame-server/v2/pkg/logger"
 
 	"go.uber.org/zap"
 	"gorm.io/driver/mysql"

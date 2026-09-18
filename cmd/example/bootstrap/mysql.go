@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/boloc/go-frame-server/internal/example/constant"
-	"github.com/boloc/go-frame-server/pkg/frame"
-	"github.com/boloc/go-frame-server/pkg/frame/components"
-	"github.com/boloc/go-frame-server/pkg/frame/config"
-	"github.com/boloc/go-frame-server/pkg/util"
+	"github.com/boloc/go-frame-server/v2/internal/example/constant"
+	"github.com/boloc/go-frame-server/v2/pkg/frame"
+	"github.com/boloc/go-frame-server/v2/pkg/frame/components"
+	"github.com/boloc/go-frame-server/v2/pkg/frame/config"
+	"github.com/boloc/go-frame-server/v2/pkg/util"
 )
 
 // DatabaseConfig 对应配置段 database.<name>。

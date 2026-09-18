@@ -1,9 +1,9 @@
 package route
 
 import (
-	examplemw "github.com/boloc/go-frame-server/internal/example/middleware"
+	examplemw "github.com/boloc/go-frame-server/v2/internal/example/middleware"
 
-	"github.com/boloc/go-frame-server/internal/example/handler"
+	"github.com/boloc/go-frame-server/v2/internal/example/handler"
 	"github.com/gin-gonic/gin"
 )
 

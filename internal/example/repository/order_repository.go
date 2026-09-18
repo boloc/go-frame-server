@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/boloc/go-frame-server/internal/example/dto"
-	"github.com/boloc/go-frame-server/pkg/errs"
-	"github.com/boloc/go-frame-server/pkg/logger"
+	"github.com/boloc/go-frame-server/v2/internal/example/dto"
+	"github.com/boloc/go-frame-server/v2/pkg/errs"
+	"github.com/boloc/go-frame-server/v2/pkg/logger"
 	"go.uber.org/zap"
 )
 

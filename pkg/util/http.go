@@ -9,7 +9,7 @@ import (
 
 	"github.com/go-resty/resty/v2"
 
-	"github.com/boloc/go-frame-server/pkg/logger"
+	"github.com/boloc/go-frame-server/v2/pkg/logger"
 )
 
 // HTTPClientOptions 覆盖默认的超时/重试/连接池参数。零值回落到 defaultHTTPClientOptions。

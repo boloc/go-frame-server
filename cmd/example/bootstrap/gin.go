@@ -4,12 +4,12 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/boloc/go-frame-server/cmd/example/route"
-	"github.com/boloc/go-frame-server/pkg/frame"
-	"github.com/boloc/go-frame-server/pkg/frame/components"
-	"github.com/boloc/go-frame-server/pkg/frame/config"
-	"github.com/boloc/go-frame-server/pkg/frame/middleware"
-	"github.com/boloc/go-frame-server/pkg/monitor"
+	"github.com/boloc/go-frame-server/v2/cmd/example/route"
+	"github.com/boloc/go-frame-server/v2/pkg/frame"
+	"github.com/boloc/go-frame-server/v2/pkg/frame/components"
+	"github.com/boloc/go-frame-server/v2/pkg/frame/config"
+	"github.com/boloc/go-frame-server/v2/pkg/frame/middleware"
+	"github.com/boloc/go-frame-server/v2/pkg/monitor"
 
 	"github.com/gin-gonic/gin"
 )

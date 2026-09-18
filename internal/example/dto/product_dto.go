@@ -3,10 +3,10 @@ package dto
 import (
 	"encoding/json"
 
-	"github.com/boloc/go-frame-server/internal/example/enum"
-	"github.com/boloc/go-frame-server/internal/model"
-	"github.com/boloc/go-frame-server/pkg/frame/pagination"
-	"github.com/boloc/go-frame-server/pkg/util"
+	"github.com/boloc/go-frame-server/v2/internal/example/enum"
+	"github.com/boloc/go-frame-server/v2/internal/model"
+	"github.com/boloc/go-frame-server/v2/pkg/frame/pagination"
+	"github.com/boloc/go-frame-server/v2/pkg/util"
 )
 
 // ==================== 请求 ====================

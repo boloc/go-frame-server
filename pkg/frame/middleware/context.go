@@ -7,9 +7,9 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/boloc/go-frame-server/pkg/errs"
-	"github.com/boloc/go-frame-server/pkg/frame/reqctx"
-	"github.com/boloc/go-frame-server/pkg/frame/webx"
+	"github.com/boloc/go-frame-server/v2/pkg/errs"
+	"github.com/boloc/go-frame-server/v2/pkg/frame/reqctx"
+	"github.com/boloc/go-frame-server/v2/pkg/frame/webx"
 
 	"github.com/gin-gonic/gin"
 	"uuid"

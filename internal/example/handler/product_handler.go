@@ -1,12 +1,12 @@
 package handler
 
 import (
-	examplecache "github.com/boloc/go-frame-server/internal/example/cache"
-	"github.com/boloc/go-frame-server/internal/example/dto"
-	"github.com/boloc/go-frame-server/internal/example/enum"
-	"github.com/boloc/go-frame-server/internal/example/logic"
-	"github.com/boloc/go-frame-server/pkg/errs"
-	"github.com/boloc/go-frame-server/pkg/frame/webx"
+	examplecache "github.com/boloc/go-frame-server/v2/internal/example/cache"
+	"github.com/boloc/go-frame-server/v2/internal/example/dto"
+	"github.com/boloc/go-frame-server/v2/internal/example/enum"
+	"github.com/boloc/go-frame-server/v2/internal/example/logic"
+	"github.com/boloc/go-frame-server/v2/pkg/errs"
+	"github.com/boloc/go-frame-server/v2/pkg/frame/webx"
 	"github.com/gin-gonic/gin"
 )
 

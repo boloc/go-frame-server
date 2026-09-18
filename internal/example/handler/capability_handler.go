@@ -4,11 +4,11 @@ import (
 	"errors"
 	"time"
 
-	"github.com/boloc/go-frame-server/internal/example/bizerr"
-	"github.com/boloc/go-frame-server/pkg/errs"
-	"github.com/boloc/go-frame-server/pkg/frame"
-	"github.com/boloc/go-frame-server/pkg/frame/webx"
-	"github.com/boloc/go-frame-server/pkg/util"
+	"github.com/boloc/go-frame-server/v2/internal/example/bizerr"
+	"github.com/boloc/go-frame-server/v2/pkg/errs"
+	"github.com/boloc/go-frame-server/v2/pkg/frame"
+	"github.com/boloc/go-frame-server/v2/pkg/frame/webx"
+	"github.com/boloc/go-frame-server/v2/pkg/util"
 	"github.com/gin-gonic/gin"
 )
 

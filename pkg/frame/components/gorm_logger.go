@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	flog "github.com/boloc/go-frame-server/pkg/logger"
+	flog "github.com/boloc/go-frame-server/v2/pkg/logger"
 
 	"go.uber.org/zap"
 	"gorm.io/gorm"

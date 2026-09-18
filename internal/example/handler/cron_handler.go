@@ -1,8 +1,8 @@
 package handler
 
 import (
-	"github.com/boloc/go-frame-server/internal/example/repository"
-	"github.com/boloc/go-frame-server/pkg/frame/webx"
+	"github.com/boloc/go-frame-server/v2/internal/example/repository"
+	"github.com/boloc/go-frame-server/v2/pkg/frame/webx"
 	"github.com/gin-gonic/gin"
 )
 

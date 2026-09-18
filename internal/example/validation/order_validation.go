@@ -4,8 +4,8 @@
 package validation
 
 import (
-	"github.com/boloc/go-frame-server/internal/example/dto"
-	"github.com/boloc/go-frame-server/pkg/errs"
+	"github.com/boloc/go-frame-server/v2/internal/example/dto"
+	"github.com/boloc/go-frame-server/v2/pkg/errs"
 )
 
 // bannedProductIDs 模拟运营临时下架、禁止购买的产品。

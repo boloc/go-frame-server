@@ -145,7 +145,7 @@ func (e *Error) Error() string {
 // Unwrap 支持 errors.Is / errors.As 穿透到底层原因。
 func (e *Error) Unwrap() error { return e.Err }
 
-const pkgImportPath = "github.com/boloc/go-frame-server/pkg/errs"
+const pkgImportPath = "github.com/boloc/go-frame-server/v2/pkg/errs"
 
 // captureCaller 返回调用栈上第一个不属于本包的帧。
 func captureCaller() string {

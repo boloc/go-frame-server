@@ -1,10 +1,10 @@
 package bootstrap
 
 import (
-	"github.com/boloc/go-frame-server/internal/example/constant"
-	"github.com/boloc/go-frame-server/pkg/frame"
-	"github.com/boloc/go-frame-server/pkg/frame/components"
-	"github.com/boloc/go-frame-server/pkg/frame/config"
+	"github.com/boloc/go-frame-server/v2/internal/example/constant"
+	"github.com/boloc/go-frame-server/v2/pkg/frame"
+	"github.com/boloc/go-frame-server/v2/pkg/frame/components"
+	"github.com/boloc/go-frame-server/v2/pkg/frame/config"
 )
 
 // Setup 初始化所有组件。conf 由 main 显式加载后传入。

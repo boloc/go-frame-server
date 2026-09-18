@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/boloc/go-frame-server/pkg/logger"
+	"github.com/boloc/go-frame-server/v2/pkg/logger"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )

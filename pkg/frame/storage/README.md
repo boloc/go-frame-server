@@ -78,7 +78,7 @@ if !ok {
 ## 接入示例（直接用 Go 结构体字面量，适合脚本/单测场景）
 
 ```go
-import "github.com/boloc/go-frame-server/pkg/frame/storage"
+import "github.com/boloc/go-frame-server/v2/pkg/frame/storage"
 
 client, err := storage.NewR2Client(ctx, storage.R2Config{
     AccountID:       "your-cloudflare-account-id",

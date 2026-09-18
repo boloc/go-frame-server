@@ -12,8 +12,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/boloc/go-frame-server/pkg/alert"
-	"github.com/boloc/go-frame-server/pkg/logger"
+	"github.com/boloc/go-frame-server/v2/pkg/alert"
+	"github.com/boloc/go-frame-server/v2/pkg/logger"
 	"go.uber.org/zap"
 )
 

@@ -1,9 +1,9 @@
 package bootstrap
 
 import (
-	"github.com/boloc/go-frame-server/pkg/frame"
-	"github.com/boloc/go-frame-server/pkg/frame/config"
-	"github.com/boloc/go-frame-server/pkg/logger"
+	"github.com/boloc/go-frame-server/v2/pkg/frame"
+	"github.com/boloc/go-frame-server/v2/pkg/frame/config"
+	"github.com/boloc/go-frame-server/v2/pkg/logger"
 )
 
 // LogsConfig 对应配置段 logs。

@@ -5,10 +5,10 @@ import (
 	"context"
 	"time"
 
-	"github.com/boloc/go-frame-server/internal/example/repository"
-	"github.com/boloc/go-frame-server/pkg/frame/cron"
-	"github.com/boloc/go-frame-server/pkg/frame/webx"
-	"github.com/boloc/go-frame-server/pkg/logger"
+	"github.com/boloc/go-frame-server/v2/internal/example/repository"
+	"github.com/boloc/go-frame-server/v2/pkg/frame/cron"
+	"github.com/boloc/go-frame-server/v2/pkg/frame/webx"
+	"github.com/boloc/go-frame-server/v2/pkg/logger"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 )

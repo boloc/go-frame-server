@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/boloc/go-frame-server/pkg/constant"
-	"github.com/boloc/go-frame-server/pkg/frame/validate"
+	"github.com/boloc/go-frame-server/v2/pkg/constant"
+	"github.com/boloc/go-frame-server/v2/pkg/frame/validate"
 
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/viper"

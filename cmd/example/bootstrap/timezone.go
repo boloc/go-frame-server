@@ -1,8 +1,8 @@
 package bootstrap
 
 import (
-	"github.com/boloc/go-frame-server/pkg/frame/config"
-	"github.com/boloc/go-frame-server/pkg/util"
+	"github.com/boloc/go-frame-server/v2/pkg/frame/config"
+	"github.com/boloc/go-frame-server/v2/pkg/util"
 )
 
 // SetupTimezone 设置整个进程的默认时区（server.timezone，未配置时 UTC），影响

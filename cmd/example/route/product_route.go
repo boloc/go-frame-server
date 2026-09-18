@@ -3,8 +3,8 @@ package route
 import (
 	"time"
 
-	"github.com/boloc/go-frame-server/internal/example/handler"
-	"github.com/boloc/go-frame-server/pkg/frame/ratelimit"
+	"github.com/boloc/go-frame-server/v2/internal/example/handler"
+	"github.com/boloc/go-frame-server/v2/pkg/frame/ratelimit"
 	"github.com/gin-gonic/gin"
 )
 

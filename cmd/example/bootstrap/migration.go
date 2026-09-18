@@ -3,10 +3,10 @@ package bootstrap
 import (
 	"context"
 
-	"github.com/boloc/go-frame-server/internal/migration"
-	"github.com/boloc/go-frame-server/pkg/frame"
-	"github.com/boloc/go-frame-server/pkg/frame/config"
-	"github.com/boloc/go-frame-server/pkg/logger"
+	"github.com/boloc/go-frame-server/v2/internal/migration"
+	"github.com/boloc/go-frame-server/v2/pkg/frame"
+	"github.com/boloc/go-frame-server/v2/pkg/frame/config"
+	"github.com/boloc/go-frame-server/v2/pkg/logger"
 )
 
 var _ frame.Component = (*migrationComponent)(nil)

@@ -5,7 +5,7 @@ import (
 	"context"
 	"sync/atomic"
 
-	"github.com/boloc/go-frame-server/pkg/logger"
+	"github.com/boloc/go-frame-server/v2/pkg/logger"
 	"go.uber.org/zap"
 )
 

@@ -4,12 +4,12 @@ import (
 	"context"
 	"fmt"
 
-	examplecache "github.com/boloc/go-frame-server/internal/example/cache"
-	"github.com/boloc/go-frame-server/internal/example/dto"
-	"github.com/boloc/go-frame-server/internal/example/repository"
-	"github.com/boloc/go-frame-server/pkg/alert"
-	"github.com/boloc/go-frame-server/pkg/frame/pagination"
-	"github.com/boloc/go-frame-server/pkg/logger"
+	examplecache "github.com/boloc/go-frame-server/v2/internal/example/cache"
+	"github.com/boloc/go-frame-server/v2/internal/example/dto"
+	"github.com/boloc/go-frame-server/v2/internal/example/repository"
+	"github.com/boloc/go-frame-server/v2/pkg/alert"
+	"github.com/boloc/go-frame-server/v2/pkg/frame/pagination"
+	"github.com/boloc/go-frame-server/v2/pkg/logger"
 	"go.uber.org/zap"
 )
 

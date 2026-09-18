@@ -3,10 +3,10 @@ package repository
 import (
 	"context"
 
-	"github.com/boloc/go-frame-server/internal/example/constant"
-	"github.com/boloc/go-frame-server/internal/model"
-	"github.com/boloc/go-frame-server/pkg/errs"
-	"github.com/boloc/go-frame-server/pkg/frame"
+	"github.com/boloc/go-frame-server/v2/internal/example/constant"
+	"github.com/boloc/go-frame-server/v2/internal/model"
+	"github.com/boloc/go-frame-server/v2/pkg/errs"
+	"github.com/boloc/go-frame-server/v2/pkg/frame"
 	"gorm.io/gorm"
 )
 

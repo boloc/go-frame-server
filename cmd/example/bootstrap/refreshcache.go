@@ -1,8 +1,8 @@
 package bootstrap
 
 import (
-	"github.com/boloc/go-frame-server/internal/example/cache"
-	"github.com/boloc/go-frame-server/pkg/frame"
+	"github.com/boloc/go-frame-server/v2/internal/example/cache"
+	"github.com/boloc/go-frame-server/v2/pkg/frame"
 	"github.com/prometheus/client_golang/prometheus"
 )
 

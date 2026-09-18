@@ -3,10 +3,10 @@ package handler
 import (
 	"time"
 
-	"github.com/boloc/go-frame-server/internal/example/dto"
-	"github.com/boloc/go-frame-server/pkg/errs"
-	"github.com/boloc/go-frame-server/pkg/frame/storage"
-	"github.com/boloc/go-frame-server/pkg/frame/webx"
+	"github.com/boloc/go-frame-server/v2/internal/example/dto"
+	"github.com/boloc/go-frame-server/v2/pkg/errs"
+	"github.com/boloc/go-frame-server/v2/pkg/frame/storage"
+	"github.com/boloc/go-frame-server/v2/pkg/frame/webx"
 	"github.com/gin-gonic/gin"
 )
 

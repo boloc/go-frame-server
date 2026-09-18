@@ -1,8 +1,8 @@
 package route
 
 import (
-	"github.com/boloc/go-frame-server/cmd/example/cron"
-	"github.com/boloc/go-frame-server/internal/example/handler"
+	"github.com/boloc/go-frame-server/v2/cmd/example/cron"
+	"github.com/boloc/go-frame-server/v2/internal/example/handler"
 	"github.com/gin-gonic/gin"
 )
 

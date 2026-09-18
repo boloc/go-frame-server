@@ -5,7 +5,7 @@ package bizerr
 import (
 	"net/http"
 
-	"github.com/boloc/go-frame-server/pkg/errs"
+	"github.com/boloc/go-frame-server/v2/pkg/errs"
 )
 
 // 订单相关的业务错误码。

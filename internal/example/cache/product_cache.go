@@ -4,10 +4,10 @@ import (
 	"context"
 	"time"
 
-	"github.com/boloc/go-frame-server/internal/example/constant"
-	"github.com/boloc/go-frame-server/internal/example/repository"
-	"github.com/boloc/go-frame-server/pkg/errs"
-	"github.com/boloc/go-frame-server/pkg/frame/refreshcache"
+	"github.com/boloc/go-frame-server/v2/internal/example/constant"
+	"github.com/boloc/go-frame-server/v2/internal/example/repository"
+	"github.com/boloc/go-frame-server/v2/pkg/errs"
+	"github.com/boloc/go-frame-server/v2/pkg/frame/refreshcache"
 )
 
 // ProductActiveCount 缓存当前上架产品数量：30s 刷 Redis，5s 刷内存。

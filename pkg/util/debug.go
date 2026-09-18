@@ -9,7 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/boloc/go-frame-server/pkg/frame/reqctx"
+	"github.com/boloc/go-frame-server/v2/pkg/frame/reqctx"
 )
 
 // 本文件仅用于本地调试：打印到 stdout，可能含敏感字段，不要留在生产路径。

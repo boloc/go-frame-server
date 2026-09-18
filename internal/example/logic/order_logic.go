@@ -1,10 +1,10 @@
 package logic
 
 import (
-	"github.com/boloc/go-frame-server/internal/example/bizerr"
-	"github.com/boloc/go-frame-server/internal/example/dto"
-	"github.com/boloc/go-frame-server/internal/example/repository"
-	"github.com/boloc/go-frame-server/pkg/errs"
+	"github.com/boloc/go-frame-server/v2/internal/example/bizerr"
+	"github.com/boloc/go-frame-server/v2/internal/example/dto"
+	"github.com/boloc/go-frame-server/v2/internal/example/repository"
+	"github.com/boloc/go-frame-server/v2/pkg/errs"
 )
 
 // OrderLogic 订单业务逻辑：编排 repository、把"库存不足"这类业务规则翻译成明确的错误码。
