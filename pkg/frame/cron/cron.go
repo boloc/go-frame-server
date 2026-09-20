@@ -344,6 +344,11 @@ func (c *Component) Stop(ctx context.Context) error {
 type logAdapter struct{}
 
 func (logAdapter) Info(msg string, keysAndValues ...any) {
+	// SkipIfStillRunning 每次跳过都打 skip；refreshcache 的 jitter 会让这成为常态，不进 Info。
+	if msg == "skip" {
+		logger.Debug("cron: "+msg, toZapFields(keysAndValues)...)
+		return
+	}
 	logger.Info("cron: "+msg, toZapFields(keysAndValues)...)
 }
 
