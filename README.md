@@ -174,7 +174,7 @@ rdb    := frame.GetRedisCmdable()           // 通用 Redis 接口，自动适�
 | 出站 HTTP    | `pkg/util.GetClient` / `GetNamedClient` | resty 客户端，默认重试幂等方法                                                                              | `/test/http-client/*`                                                                                   |
 | 枚举下拉       | `pkg/util/options`                      | 一次 `Put` 同时拿列表和查找表                                                                              | `GET /api/products/options`（`internal/example/enum/product.go`）                                         |
 | 集合辅助       | `pkg/util/maps`                         | `MapBuilder` / `SliceToMap` / `GetOrDefault` 等                                                  | `GET /test/maps`                                                                                        |
-| 日志         | `pkg/logger`                            | 字段化 `logger.Info(..., zap.String(...))`；`WithLoggerStdoutJSON`                                  | `cmd/example/bootstrap/logger.go`；`GET /test/logger`                                                    |
+| 日志         | `pkg/logger`                            | 字段化 `logger.Info(..., logger.String(...))`；`WithLoggerStdoutJSON`                                  | `cmd/example/bootstrap/logger.go`；`GET /test/logger`                                                    |
 | 进程指标       | `pkg/monitor`                           | 内存/goroutine 采集 + `HTTPMetrics` + `/metrics` Basic Auth                                         | `cmd/example/bootstrap/monitor.go`                                                                      |
 
 

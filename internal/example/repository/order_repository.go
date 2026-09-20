@@ -9,7 +9,6 @@ import (
 	"github.com/boloc/go-frame-server/v2/internal/example/dto"
 	"github.com/boloc/go-frame-server/v2/pkg/errs"
 	"github.com/boloc/go-frame-server/v2/pkg/logger"
-	"go.uber.org/zap"
 )
 
 // OrderRepository 订单仓储。用内存 map 模拟持久化，方便 demo 不依赖 MySQL。
@@ -88,7 +87,7 @@ func (r *OrderRepository) ReportLowStock(ctx context.Context) error {
 	for productID, stock := range r.stock {
 		if stock < lowStockThreshold { // 库存低于阈值打警告日志
 			logger.Warn("order: low stock detected",
-				zap.Uint("product_id", productID), zap.Int("stock", stock))
+				logger.Uint("product_id", productID), logger.Int("stock", stock))
 		}
 	}
 	return nil

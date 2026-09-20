@@ -10,7 +10,6 @@ import (
 	"github.com/boloc/go-frame-server/v2/pkg/frame/webx"
 	"github.com/boloc/go-frame-server/v2/pkg/logger"
 	"github.com/gin-gonic/gin"
-	"go.uber.org/zap"
 )
 
 // Component 本示例的定时任务单例；新增任务往这里加 Task，不要再建第二个 Component。
@@ -44,12 +43,12 @@ var Component = cron.NewComponent("crontab-tasks",
 )
 
 func heartbeat(ctx context.Context) error {
-	logger.Info("cron: heartbeat", zap.Time("at", time.Now()))
+	logger.Info("cron: heartbeat", logger.Time("at", time.Now()))
 	return nil
 }
 
 func minuteMarker(ctx context.Context) error {
-	logger.Info("cron: minute marker", zap.Time("at", time.Now()))
+	logger.Info("cron: minute marker", logger.Time("at", time.Now()))
 	return nil
 }
 

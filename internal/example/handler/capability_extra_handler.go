@@ -12,7 +12,6 @@ import (
 	"github.com/boloc/go-frame-server/v2/pkg/logger"
 	"github.com/boloc/go-frame-server/v2/pkg/util/maps"
 	"github.com/gin-gonic/gin"
-	"go.uber.org/zap"
 )
 
 // CapabilityBodyLimit 回显已被 ContextMiddleware 读入的请求体长度。
@@ -196,9 +195,9 @@ func CapabilityMaps(c *gin.Context) {
 func CapabilityLogger(c *gin.Context) {
 	rc := reqctx.FromGin(c)
 	logger.Info("example: structured log demo",
-		zap.String("request_id", rc.RequestID),
-		zap.String("route", c.FullPath()),
-		zap.String("hint", "容器采集 stdout 时把 logs.stdout_json 设为 true"),
+		logger.String("request_id", rc.RequestID),
+		logger.String("route", c.FullPath()),
+		logger.String("hint", "容器采集 stdout 时把 logs.stdout_json 设为 true"),
 	)
 	webx.Success(c, gin.H{
 		"hint": "看一条带 request_id/route 的 info 日志；JSON 控制台见 logs.stdout_json 与 bootstrap/logger.go",

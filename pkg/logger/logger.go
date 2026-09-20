@@ -337,22 +337,22 @@ func timeEncoder(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
 	enc.AppendString(t.Format(time.DateTime))
 }
 
-func Debug(msg string, fields ...zap.Field) {
+func Debug(msg string, fields ...Field) {
 	current().Debug(msg, fields...)
 }
 
-func Info(msg string, fields ...zap.Field) {
+func Info(msg string, fields ...Field) {
 	current().Info(msg, fields...)
 }
 
-func Warn(msg string, fields ...zap.Field) {
+func Warn(msg string, fields ...Field) {
 	current().Warn(msg, fields...)
 }
 
-func Error(msg string, fields ...zap.Field) {
+func Error(msg string, fields ...Field) {
 	current().Error(msg, fields...)
 }
 
-func Fatal(msg string, fields ...zap.Field) {
+func Fatal(msg string, fields ...Field) {
 	current().Fatal(msg, fields...)
 }

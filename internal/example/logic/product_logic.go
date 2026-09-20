@@ -10,7 +10,6 @@ import (
 	"github.com/boloc/go-frame-server/v2/pkg/alert"
 	"github.com/boloc/go-frame-server/v2/pkg/frame/pagination"
 	"github.com/boloc/go-frame-server/v2/pkg/logger"
-	"go.uber.org/zap"
 )
 
 // ProductLogic 产品业务逻辑
@@ -61,7 +60,7 @@ func (l *ProductLogic) GetDetail(ctx context.Context, id uint) (*dto.ProductDeta
 	if notice, ok := examplecache.ProductNotice.Get(ctx); ok {
 		detail.Notice = notice
 	} else {
-		logger.Warn("product: 读取详情页公告缓存失败", zap.Uint("product_id", id))
+		logger.Warn("product: 读取详情页公告缓存失败", logger.Uint("product_id", id))
 	}
 
 	return detail, nil
@@ -76,7 +75,7 @@ func (l *ProductLogic) UpdateStatus(ctx context.Context, id uint, status int) er
 	// 审计日志失败不影响接口结果，只记录并告警。
 	detail := fmt.Sprintf("status=%d", status)
 	if err := l.operationLogRepo.Create(ctx, "product.update_status", "product", id, detail); err != nil {
-		logger.Warn("product: 写审计日志失败", zap.Error(err), zap.Uint("product_id", id))
+		logger.Warn("product: 写审计日志失败", logger.Err(err), logger.Uint("product_id", id))
 		alert.Notify(ctx, alert.Event{
 			Scope:   "product",
 			Name:    "update_status.audit_log",

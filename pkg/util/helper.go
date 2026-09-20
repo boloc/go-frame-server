@@ -92,17 +92,12 @@ func BuildMysqlDSN(cfg MySQLDSNConfig) (string, error) {
 	}
 
 	// time_zone：把 MySQL 会话时区也钉到和 loc 一致。loc 只决定 Go 这一侧怎么解释读出来的
-	// DATETIME 裸字符串，不影响服务端；服务端的 NOW()/CURRENT_TIMESTAMP/DEFAULT CURRENT_TIMESTAMP
-	// 用的是会话 time_zone（默认继承服务器的 system time_zone，往往是 +08:00）。两边不一致时，
-	// 由数据库默认值生成的时间会被 Go 按 UTC 误读，整体差出一个时区偏移——这不是理论风险，
-	// 用 NOW() 灌测试数据再由应用读出来就能复现。UTC 用 '+00:00' 写法不依赖 MySQL 时区表；
-	// 其它时区用 IANA 名字，要求服务端加载过时区表（mysql_tzinfo_to_sql），没加载会在建连时
-	// 报错，属于应该在启动阶段暴露的配置问题。
-	params := map[string]string{}
-	if location == time.UTC {
-		params["time_zone"] = "'+00:00'"
-	} else {
-		params["time_zone"] = "'" + location.String() + "'"
+	// DATETIME 裸字符串；NOW()/CURRENT_TIMESTAMP 用的是会话 time_zone。两边不一致时，
+	// 库自己生成的时间会被 Go 按 loc 误读，差出一个偏移。
+	// 会话侧一律写 '+08:00' 这种偏移，不写 Asia/Shanghai：后者要时区表，没装会 1298。
+	// loc 仍用 IANA 名，Go 读 DATETIME 的语义不变。
+	params := map[string]string{
+		"time_zone": mysqlSessionTimeZone(location),
 	}
 	if cfg.Charset != "" {
 		params["charset"] = cfg.Charset
@@ -110,6 +105,18 @@ func BuildMysqlDSN(cfg MySQLDSNConfig) (string, error) {
 	dsnCfg.Params = params
 
 	return dsnCfg.FormatDSN(), nil
+}
+
+// mysqlSessionTimeZone 把 loc 收成 MySQL 一定认的偏移，例如 '+08:00'、'+00:00'。
+// 不用 IANA 名，避免没装时区表时 Error 1298。
+func mysqlSessionTimeZone(loc *time.Location) string {
+	_, offset := time.Now().In(loc).Zone()
+	sign := "+"
+	if offset < 0 {
+		sign = "-"
+		offset = -offset
+	}
+	return fmt.Sprintf("'%s%02d:%02d'", sign, offset/3600, (offset%3600)/60)
 }
 
 // parseDurationOrDefault 解析配置里的时长字符串；空串用 def，非法值返回带字段名的 error。

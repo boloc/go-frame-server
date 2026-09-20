@@ -25,7 +25,7 @@ func SetupLogger(f *frame.Frame, conf *config.ConfigComponent) {
 	conf.MustStrictUnmarshalKey("logs", &cfg)
 
 	// WithLoggerStdoutJSON：容器采集 stdout 时打开，避免 ANSI 颜色码混进日志系统。
-	// 字段化用法见 GET /test/logger（logger.Info + zap.String）。
+	// 字段化用法见 GET /test/logger（logger.Info + logger.String）。
 	log := logger.NewLoggerComponent(
 		logger.WithLoggerLevel(cfg.LogLevel),
 		logger.WithLoggerStdout(cfg.IsStdout),

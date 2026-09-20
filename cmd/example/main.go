@@ -16,7 +16,6 @@ import (
 	"github.com/boloc/go-frame-server/v2/pkg/frame/config"
 	"github.com/boloc/go-frame-server/v2/pkg/frame/webx"
 	"github.com/boloc/go-frame-server/v2/pkg/logger"
-	"go.uber.org/zap"
 )
 
 // main 展示框架推荐的装配顺序：先显式解析并加载配置，再创建 Frame、注册组件、运行。
@@ -44,10 +43,10 @@ func main() {
 	// （能拿到 route + *errs.Error），适合做请求级错误率统计；alert 覆盖后台/异步失败。
 	webx.SetOnFail(func(route string, err *errs.Error) {
 		logger.Warn("webx: on_fail",
-			zap.String("route", route),
-			zap.Int("code", int(err.Code)),
-			zap.String("message", err.Message),
-			zap.String("caller", err.Caller),
+			logger.String("route", route),
+			logger.Int("code", int(err.Code)),
+			logger.String("message", err.Message),
+			logger.String("caller", err.Caller),
 		)
 	})
 
@@ -64,13 +63,13 @@ func main() {
 	// 真实项目按 e.Scope 分发到飞书/钉钉/Slack webhook，不要在 Hook 里同步做重活。
 	// Dropped() 是并发 Hook 打满 64 后丢弃的累计数，可接进 Prometheus。
 	alert.SetHook(func(_ context.Context, e alert.Event) {
-		fields := []zap.Field{
-			zap.String("scope", e.Scope),
-			zap.String("name", e.Name),
-			zap.String("message", e.Message),
-			zap.Error(e.Err),
-			zap.Any("fields", e.Fields),
-			zap.Uint64("dropped_total", alert.Dropped()),
+		fields := []logger.Field{
+			logger.String("scope", e.Scope),
+			logger.String("name", e.Name),
+			logger.String("message", e.Message),
+			logger.Err(e.Err),
+			logger.Any("fields", e.Fields),
+			logger.Uint64("dropped_total", alert.Dropped()),
 		}
 		if e.Scope == "lifecycle" {
 			logger.Info("alert: event", fields...)
@@ -85,10 +84,10 @@ func main() {
 		_, redisOK := frame.TryGetRedisCmdable()
 		_, chOK := components.TryDefaultClickHouseDB()
 		logger.Info("example: after start",
-			zap.Int("routes", route.RegisteredRouteCount()),
-			zap.Bool("mysql_ready", mysqlOK),
-			zap.Bool("redis_ready", redisOK),
-			zap.Bool("clickhouse_ready", chOK),
+			logger.Int("routes", route.RegisteredRouteCount()),
+			logger.Bool("mysql_ready", mysqlOK),
+			logger.Bool("redis_ready", redisOK),
+			logger.Bool("clickhouse_ready", chOK),
 		)
 		if !mysqlOK || !redisOK {
 			return fmt.Errorf("after start: required deps not ready mysql=%v redis=%v", mysqlOK, redisOK)
