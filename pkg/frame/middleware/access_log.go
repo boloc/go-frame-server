@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"net/http"
 	"time"
 
 	"github.com/boloc/go-frame-server/v2/pkg/errs"
@@ -26,14 +27,22 @@ func AccessLog(opts ...AccessLogOption) gin.HandlerFunc {
 			c.Next()
 			return
 		}
+		// 浏览器跨域会先打 OPTIONS 预检，成功是 204 且没有业务码。
+		// 记访问日志只会刷屏；预检本身也不代表一次业务调用。
+		if c.Request.Method == http.MethodOptions {
+			c.Next()
+			return
+		}
 
 		start := time.Now()
 		c.Next()
 		latency := time.Since(start)
 
 		bizCode := errs.Code(-1)
+		hasBiz := false
 		if code, ok := webx.BizCode(c); ok {
 			bizCode = code
+			hasBiz = true
 		}
 
 		slow := cfg.slowThreshold > 0 && latency >= cfg.slowThreshold
@@ -62,7 +71,7 @@ func AccessLog(opts ...AccessLogOption) gin.HandlerFunc {
 			fields = append(fields, zap.Bool("slow", true))
 		}
 
-		switch accessLogLevel(c.Writer.Status(), bizCode, slow) {
+		switch accessLogLevel(c.Writer.Status(), bizCode, hasBiz, slow) {
 		case zapcore.ErrorLevel:
 			logger.Error("http: access", fields...)
 		case zapcore.WarnLevel:
@@ -107,11 +116,12 @@ func WithSlowThreshold(d time.Duration) AccessLogOption {
 	}
 }
 
-func accessLogLevel(status int, bizCode errs.Code, slow bool) zapcore.Level {
-	if status >= 500 || bizCode >= errs.CodeInternal {
+func accessLogLevel(status int, bizCode errs.Code, hasBiz, slow bool) zapcore.Level {
+	if status >= 500 || (hasBiz && bizCode >= errs.CodeInternal) {
 		return zapcore.ErrorLevel
 	}
-	if status >= 400 || bizCode != 0 || slow {
+	// biz_code=-1 是「没走 webx」，不是业务失败。OPTIONS 204 就属于这种。
+	if status >= 400 || (hasBiz && bizCode != 0) || slow {
 		return zapcore.WarnLevel
 	}
 	return zapcore.InfoLevel
