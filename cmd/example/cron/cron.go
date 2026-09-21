@@ -18,9 +18,10 @@ import (
 //   - Prometheus 指标上的 scheduler 标签（cron_task_runs_total/cron_task_duration_seconds）；
 //   - Exclusive 任务锁 key 的一段，见 cron.Component.LockKey。
 //
-// 必须区别于 pkg/frame/refreshcache 内部各自持有的 cron.Component（用各自的 Options.Key
-// 当调度器名），否则 Prometheus 指标同名冲突，见 cron.NewComponent 的文档注释。
-var Component = cron.NewComponent("crontab-tasks",
+// refreshcache 内部调度器开了 WithoutMetrics，不占 cron_task_*；这里的 name 仍要
+// 稳定，给 scheduler 标签和 Exclusive 锁 key 用。
+var Component = cron.NewComponentWithOptions("crontab-tasks",
+	[]cron.Option{cron.WithDurationMetrics()}, // 示例业务任务少，打开耗时；缓存刷新不走这套指标
 	cron.Task{
 		Name:     "heartbeat",
 		Schedule: "@every 30s",

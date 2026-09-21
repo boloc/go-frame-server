@@ -1,7 +1,7 @@
 // Package cache 存放本示例的双层刷新只读缓存实例。
 //
 // 每个实例用 register 声明，声明即登记：bootstrap.SetupCaches 遍历 All() 统一注册进 Frame
-// 并挂上刷新任务指标。新增一个缓存只需在本包加一个文件，不用再改 bootstrap。
+// 并挂上 refreshcache_refresh_total。新增一个缓存只需在本包加一个文件，不用再改 bootstrap。
 package cache
 
 import (

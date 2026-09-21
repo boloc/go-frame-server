@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"math/rand"
 	"sync/atomic"
 	"time"
 
@@ -21,13 +20,21 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
+const (
+	stageSourceToRedis = "source_to_redis"
+	stageRedisToMemory = "redis_to_memory"
+)
+
+var errRedisUnavailable = errors.New("refreshcache: redis unavailable")
+
 // Loader 从数据源加载最新数据。
 type Loader[T any] func(ctx context.Context) (T, error)
 
 // Options 缓存配置。Key/Loader/RedisInterval/MemoryInterval 必须显式设置。
 type Options[T any] struct {
 	// Key 是这个缓存实例在进程内的标识：内部 cron.Component 的 name、两条刷新任务的
-	// 名字后缀、singleflight 的合并键和日志字段都用它。它不是 Redis key 本身，
+	// 名字后缀、singleflight 的合并键、日志字段和 refreshcache_refresh_total 的 cache
+	// 标签都用它。它不是 Redis key 本身，
 	// 写进 Redis 时前面会加上命名空间和缓存段，见 Cache.RedisKey。
 	Key string
 	// Loader 从数据源加载最新数据。
@@ -38,7 +45,9 @@ type Options[T any] struct {
 	MemoryInterval time.Duration
 	// RedisTTL 必须明显大于 RedisInterval，默认 RedisInterval * 5。
 	RedisTTL time.Duration
-	// Jitter 刷新前的随机抖动上限，多实例部署时用来错开刷新时机。默认 0，不抖动。
+	// Jitter 刷新前的随机抖动上限，多实例部署时用来错开打数据源。默认 0，不抖动。
+	// 由内部 cron 在计时前 sleep；refreshcache 默认不采耗时直方图。
+	// 超过对应刷新间隔时按间隔封顶，避免内存刷新（通常更短）被长抖动拖成重叠任务。
 	Jitter time.Duration
 	// Redis 获取 Redis 客户端。
 	Redis func() (redis.Cmdable, bool)
@@ -48,6 +57,8 @@ type Options[T any] struct {
 type Cache[T any] struct {
 	opts Options[T]
 	cron *cron.Component
+
+	refreshTotal *prometheus.CounterVec
 
 	value atomic.Pointer[T]
 
@@ -59,26 +70,30 @@ type Cache[T any] struct {
 
 // New 创建双层刷新只读缓存。必填项未设置时 Start 返回 error，New 本身不检查、不 panic。
 //
-// 内部的 *cron.Component 在构造时就创建好，不等到 Start，这样 Collectors() 在 Start
-// 之前调用也能拿到真正的指标对象（用 opts.Key 当 cron.Component 的 name，见
-// cron.NewComponent 的文档注释）。
+// 内部的 *cron.Component 只负责"什么时候跑"（WithoutMetrics，不占 cron_task_*）。
+// Collectors() 交出的是 refreshcache_refresh_total，和业务定时任务不是一套指标。
 func New[T any](opts Options[T]) *Cache[T] {
 	if opts.Redis == nil {
 		opts.Redis = frame.TryGetRedisCmdable
 	}
 	c := &Cache[T]{opts: opts}
-	c.cron = cron.NewComponent(opts.Key,
-		// 从数据源刷新到 Redis
+	c.refreshTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name:        "refreshcache_refresh_total",
+		Help:        "refreshcache 刷新次数，按 stage(source_to_redis/redis_to_memory) 和 status(success/failure/skipped/canceled) 分类",
+		ConstLabels: prometheus.Labels{"cache": opts.Key},
+	}, []string{"stage", "status"})
+	c.cron = cron.NewComponentWithOptions(opts.Key, []cron.Option{cron.WithoutMetrics()},
 		cron.Task{
 			Name:     "cache-refresh-source-to-redis:" + opts.Key,
 			Schedule: everySchedule(opts.RedisInterval),
 			Run:      c.refreshSourceToRedis,
+			Jitter:   capJitter(opts.Jitter, opts.RedisInterval),
 		},
-		// 从 Redis 刷新到内存
 		cron.Task{
 			Name:     "cache-refresh-redis-to-memory:" + opts.Key,
 			Schedule: everySchedule(opts.MemoryInterval),
 			Run:      c.refreshRedisToMemory,
+			Jitter:   capJitter(opts.Jitter, opts.MemoryInterval),
 		},
 	)
 	return c
@@ -144,9 +159,12 @@ func (c *Cache[T]) Stop(ctx context.Context) error {
 	return c.cron.Stop(ctx)
 }
 
-// Collectors 返回需要注册到 Prometheus 的采集器。
+// Collectors 返回 refreshcache 自己的采集器，不是内部 cron 的 cron_task_*。
 func (c *Cache[T]) Collectors() []prometheus.Collector {
-	return c.cron.Collectors()
+	if c.refreshTotal == nil {
+		return nil
+	}
+	return []prometheus.Collector{c.refreshTotal}
 }
 
 func (c *Cache[T]) warmUp(ctx context.Context) {
@@ -167,32 +185,32 @@ func (c *Cache[T]) warmUp(ctx context.Context) {
 		return
 	}
 	c.value.Store(&v)
-	c.writeToRedis(ctx, v)
+	_ = c.writeToRedis(ctx, v)
 }
 
 func (c *Cache[T]) refreshSourceToRedis(ctx context.Context) error {
-	if err := c.applyJitter(ctx); err != nil {
-		return err
-	}
-
 	v, err := c.opts.Loader(ctx)
 	if err != nil {
+		c.observeRefresh(stageSourceToRedis, statusFrom(err))
 		return err
 	}
-	c.writeToRedis(ctx, v)
+	// 写 Redis 失败不当任务失败：数据源已经取到，内存层照样能刷，只记指标和 Warn，
+	// 不让 Redis 抖一下就逐轮告警。
+	if err := c.writeToRedis(ctx, v); err != nil {
+		c.observeRefresh(stageSourceToRedis, statusFrom(err))
+		return nil
+	}
+	c.observeRefresh(stageSourceToRedis, "success")
 	return nil
 }
 
 func (c *Cache[T]) refreshRedisToMemory(ctx context.Context) error {
-	if err := c.applyJitter(ctx); err != nil {
-		return err
-	}
-
 	if client, ok := c.opts.Redis(); ok {
 		if raw, err := client.Get(ctx, c.RedisKey()).Result(); err == nil {
 			var v T
 			if err := json.Unmarshal([]byte(raw), &v); err == nil {
 				c.value.Store(&v)
+				c.observeRefresh(stageRedisToMemory, "success")
 				return nil
 			}
 		}
@@ -200,43 +218,61 @@ func (c *Cache[T]) refreshRedisToMemory(ctx context.Context) error {
 
 	v, err := c.opts.Loader(ctx)
 	if err != nil {
+		c.observeRefresh(stageRedisToMemory, statusFrom(err))
 		return err
 	}
 	c.value.Store(&v)
+	c.observeRefresh(stageRedisToMemory, "success")
 	return nil
 }
 
-func (c *Cache[T]) writeToRedis(ctx context.Context, v T) {
+func (c *Cache[T]) writeToRedis(ctx context.Context, v T) error {
 	client, ok := c.opts.Redis()
 	if !ok {
-		return
+		return errRedisUnavailable
 	}
 	payload, err := json.Marshal(v)
 	if err != nil {
 		logger.Error("cache: marshal value failed", zap.String("key", c.opts.Key), zap.Error(err))
 		alert.Notify(ctx, alert.Event{Scope: "cache", Name: c.opts.Key, Message: "marshal failed", Err: err})
-		return
+		return err
 	}
 	if err := client.Set(ctx, c.RedisKey(), string(payload), c.opts.RedisTTL).Err(); err != nil {
 		logger.Warn("cache: write to redis failed",
 			zap.String("key", c.opts.Key), zap.String("redis_key", c.RedisKey()), zap.Error(err))
+		return err
+	}
+	return nil
+}
+
+func (c *Cache[T]) observeRefresh(stage, status string) {
+	if c.refreshTotal == nil {
+		return
+	}
+	c.refreshTotal.WithLabelValues(stage, status).Inc()
+}
+
+func statusFrom(err error) string {
+	switch {
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	case errors.Is(err, errRedisUnavailable):
+		// 没有 Redis 是支持的降级形态（内存层直接回退数据源），不能算失败，
+		// 否则没接 Redis 的应用看板上会一直是红的。
+		return "skipped"
+	default:
+		return "failure"
 	}
 }
 
-func (c *Cache[T]) applyJitter(ctx context.Context) error {
-	if err := ctx.Err(); err != nil {
-		return err
+func capJitter(jitter, interval time.Duration) time.Duration {
+	if jitter <= 0 {
+		return 0
 	}
-	if c.opts.Jitter <= 0 {
-		return nil
+	if interval > 0 && jitter > interval {
+		return interval
 	}
-	d := time.Duration(rand.Int63n(int64(c.opts.Jitter)))
-	select {
-	case <-time.After(d):
-		return ctx.Err()
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	return jitter
 }
 
 func everySchedule(d time.Duration) string {

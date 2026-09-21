@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	mathrand "math/rand"
 	"time"
 
 	"github.com/boloc/go-frame-server/v2/pkg/alert"
@@ -44,6 +45,10 @@ type Task struct {
 	// LockTTL 锁的租约时长，必须大于任务单次最长执行时间；为 0 时默认 DefaultLockTTL。
 	// 没有自动续租，任务跑得比 LockTTL 久会有第二个副本并发进来。
 	LockTTL time.Duration
+
+	// Jitter 本次触发先随机睡 [0, Jitter)，再抢锁/执行 Run。
+	// 这段等待不计入 cron_task_duration_seconds，只用来错开多副本同时打数据源。
+	Jitter time.Duration
 }
 
 // TaskInfo 任务的可展示信息，不含 Run。
@@ -68,6 +73,33 @@ func WithRedis(fn func() (redis.Cmdable, bool)) Option {
 	}
 }
 
+// WithDurationMetrics 打开 cron_task_duration_seconds 直方图。
+// 默认不开：每个 task 大约 12 条时序。失败/跳过看 cron_task_runs_total 就够；
+// 只有业务明确要盯耗时才打开。refreshcache 走自己的指标，不要给内部调度器开这个。
+func WithDurationMetrics() Option {
+	return func(c *Component) {
+		if c.metricsOff || c.duration != nil {
+			return
+		}
+		c.duration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:        "cron_task_duration_seconds",
+			Help:        "定时任务单次执行耗时（秒），不含 Jitter 等待",
+			ConstLabels: prometheus.Labels{"scheduler": c.name},
+			Buckets:     prometheus.DefBuckets,
+		}, []string{"task"})
+	}
+}
+
+// WithoutMetrics 不建、不打 cron_task_*。调度、锁、日志、告警都还在。
+// refreshcache 用这个：它只借 cron 当定时器，对外是缓存刷新，不是业务定时任务。
+func WithoutMetrics() Option {
+	return func(c *Component) {
+		c.metricsOff = true
+		c.runsTotal = nil
+		c.duration = nil
+	}
+}
+
 // Component 定时任务调度组件，实现 frame.Component（Start(ctx)/Stop(ctx)）。
 type Component struct {
 	name  string
@@ -76,45 +108,43 @@ type Component struct {
 
 	engine *gocron.Cron
 
-	runsTotal *prometheus.CounterVec
-	duration  *prometheus.HistogramVec
+	metricsOff bool
+	runsTotal  *prometheus.CounterVec
+	duration   *prometheus.HistogramVec
 }
 
 // NewComponent 创建定时任务组件。任务列表在构造时一次性传入。
 // Exclusive 任务默认用 frame.TryGetRedisCmdable 取 Redis；测试或自定义客户端用
 // NewComponentWithOptions + WithRedis。
 //
-// name 是这个 Component 在进程内唯一的标识，作为 ConstLabels 挂在
-// cron_task_runs_total/cron_task_duration_seconds 上——同一进程有多个 Component 时
-// （比如 pkg/frame/refreshcache.Cache 内部各自持有一个），name 不同才能避免指标
-// 因为完全同名同 label 在 MustRegister 时冲突 panic。
+// name 是这个 Component 在进程内唯一的标识：Prometheus scheduler 标签，以及
+// Exclusive 锁 key 的一段。同一进程里多个会打 cron_task_* 的 Component 必须
+// name 不同，否则 MustRegister 会因同名同 label 冲突 panic。
+// refreshcache 内部的调度器开了 WithoutMetrics，不占 cron_task_*。
 func NewComponent(name string, tasks ...Task) *Component {
 	return NewComponentWithOptions(name, nil, tasks...)
 }
 
-// NewComponentWithOptions 与 NewComponent 相同，并接受 Component 级选项（如 WithRedis）。
+// NewComponentWithOptions 与 NewComponent 相同，并接受 Component 级选项
+// （WithRedis / WithDurationMetrics / WithoutMetrics）。
+// 默认只建 runs 计数；耗时直方图见 WithDurationMetrics。
 func NewComponentWithOptions(name string, opts []Option, tasks ...Task) *Component {
-	constLabels := prometheus.Labels{"scheduler": name}
 	c := &Component{
 		name:  name,
 		tasks: tasks,
 		redis: frame.TryGetRedisCmdable,
-		runsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name:        "cron_task_runs_total",
-			Help:        "定时任务执行次数，按 task 名称和 status(success/failure/canceled/panic/skipped) 分类",
-			ConstLabels: constLabels,
-		}, []string{"task", "status"}),
-		duration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
-			Name:        "cron_task_duration_seconds",
-			Help:        "定时任务单次执行耗时（秒）",
-			ConstLabels: constLabels,
-			Buckets:     prometheus.DefBuckets,
-		}, []string{"task"}),
 	}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(c)
 		}
+	}
+	if !c.metricsOff {
+		c.runsTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name:        "cron_task_runs_total",
+			Help:        "定时任务执行次数，按 task 名称和 status(success/failure/canceled/panic/skipped) 分类",
+			ConstLabels: prometheus.Labels{"scheduler": name},
+		}, []string{"task", "status"})
 	}
 	return c
 }
@@ -144,8 +174,31 @@ func (c *Component) Tasks() []TaskInfo {
 }
 
 // Collectors 返回需要注册到 Prometheus 的采集器。
+// 默认只有 cron_task_runs_total；打开过 WithDurationMetrics 才带上耗时直方图。
+// WithoutMetrics 时返回空切片。
 func (c *Component) Collectors() []prometheus.Collector {
-	return []prometheus.Collector{c.runsTotal, c.duration}
+	var out []prometheus.Collector
+	if c.runsTotal != nil {
+		out = append(out, c.runsTotal)
+	}
+	if c.duration != nil {
+		out = append(out, c.duration)
+	}
+	return out
+}
+
+func (c *Component) observeRun(task, status string) {
+	if c.runsTotal == nil {
+		return
+	}
+	c.runsTotal.WithLabelValues(task, status).Inc()
+}
+
+func (c *Component) observeDuration(task string, d time.Duration) {
+	if c.duration == nil {
+		return
+	}
+	c.duration.WithLabelValues(task).Observe(d.Seconds())
 }
 
 // Start 校验任务配置并启动调度器。配置不完整或任务名重复时返回 error。
@@ -196,14 +249,20 @@ func (c *Component) Start(_ context.Context) error {
 // wrap 包装任务函数，添加日志、告警、指标采集等功能。
 func (c *Component) wrap(t Task) func(ctx context.Context) {
 	return func(ctx context.Context) {
+		// 抖动在计时和抢锁之前：锁不能在 sleep 期间空占；耗时指标只反映真正干活。
+		if err := sleepJitter(ctx, t.Jitter); err != nil {
+			c.observeRun(t.Name, "canceled")
+			return
+		}
+
 		start := time.Now()
 
 		if t.Exclusive {
 			token, acquired := c.acquireExclusive(ctx, t)
 			if !acquired {
 				elapsed := time.Since(start)
-				c.runsTotal.WithLabelValues(t.Name, "skipped").Inc()
-				c.duration.WithLabelValues(t.Name).Observe(elapsed.Seconds())
+				c.observeRun(t.Name, "skipped")
+				c.observeDuration(t.Name, elapsed)
 				return
 			}
 			defer c.releaseExclusive(ctx, t, token)
@@ -211,8 +270,8 @@ func (c *Component) wrap(t Task) func(ctx context.Context) {
 
 		defer func() {
 			if r := recover(); r != nil {
-				c.runsTotal.WithLabelValues(t.Name, "panic").Inc()
-				c.duration.WithLabelValues(t.Name).Observe(time.Since(start).Seconds())
+				c.observeRun(t.Name, "panic")
+				c.observeDuration(t.Name, time.Since(start))
 				alert.Notify(ctx, alert.Event{
 					Scope: "cron", Name: t.Name, Message: "task panicked",
 					Fields: map[string]any{"panic": r},
@@ -244,8 +303,8 @@ func (c *Component) wrap(t Task) func(ctx context.Context) {
 				Fields: map[string]any{"elapsed": elapsed.String()},
 			})
 		}
-		c.runsTotal.WithLabelValues(t.Name, status).Inc()
-		c.duration.WithLabelValues(t.Name).Observe(elapsed.Seconds())
+		c.observeRun(t.Name, status)
+		c.observeDuration(t.Name, elapsed)
 	}
 }
 
@@ -315,6 +374,28 @@ func (c *Component) lockUnavailable(ctx context.Context, t Task, reason string, 
 		Err:     err,
 		Fields:  map[string]any{"reason": reason, "scheduler": c.name},
 	})
+}
+
+// sleepJitter 随机等待 [0, d)。d<=0 或已取消时立刻返回。
+func sleepJitter(ctx context.Context, d time.Duration) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if d <= 0 {
+		return nil
+	}
+	wait := time.Duration(mathrand.Int63n(int64(d)))
+	if wait <= 0 {
+		return ctx.Err()
+	}
+	t := time.NewTimer(wait)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return ctx.Err()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func newLockToken() (string, error) {

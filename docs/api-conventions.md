@@ -221,9 +221,9 @@ type ProductItem struct { ... }
 - **业务侧只应该有一个"顶层"`cron.Component`**（比如 `cmd/example/cron.Component`），
   新增业务定时任务是往已有的 `NewComponent(...)` 调用里加一个 `Task`，不是新建第二个
   顶层 `Component`。`pkg/frame/refreshcache.Cache` 是唯一的例外，它内部每个实例都各自
-  持有一个独立的 `cron.Component`。`NewComponent(name, tasks...)` 的 `name` 参数用来
-  区分同一进程里的多个 `Component`（避免 Prometheus 指标同名冲突）：业务顶层 Component
-  传一个稳定的应用名（比如 `"example"`），`refreshcache.Cache` 内部用它自己的 `Key`。
+  持有一个独立的 `cron.Component`（`WithoutMetrics`，只当定时器，不占 `cron_task_*`）。
+  业务顶层 `NewComponent(name, tasks...)` 的 `name` 用来区分会打 `cron_task_*` 的
+  调度器，以及 Exclusive 锁 key：传一个稳定的应用名（比如 `"example"`）。
 - 注册这类组件用 `f.RegisterSingleton(key, component)`，**不要**用 `f.RegisterComponent`
   ——两者的区别：`RegisterComponent` 允许同一个 key/类型注册任意多次（MySQL/Redis 那种
   故意支持多实例的场景该用它）；`RegisterSingleton` 要求 key 唯一，重复注册**直接 panic**，
@@ -235,9 +235,12 @@ type ProductItem struct { ... }
   只是变成"调度器不再触发新的一轮，但已经在跑的这一轮不管多久都会跑完"，不会真正响应
   关闭信号。
 - 任务名（`Task.Name`）在同一个 `Component` 内必须唯一，重复会在 `Start` 阶段直接报错。
-- 需要监控定时任务执行情况时，用 `Component.Collectors()` 显式注册进 Prometheus
-  （`cron_task_runs_total{task,status}` / `cron_task_duration_seconds{task}`），不要
-  自己再发明一套指标命名。
+- 需要监控**业务定时任务**时，用 `cron.Component.Collectors()` 显式注册。
+  默认只有 `cron_task_runs_total{task,status}`（失败/跳过/panic）。耗时直方图
+  `cron_task_duration_seconds` 每个 task 大约 12 条时序，默认不算；业务要盯某条
+  任务耗时，构造时加 `cron.WithDurationMetrics()`。缓存刷新看
+  `refreshcache.Cache.Collectors()` 的 `refreshcache_refresh_total{cache,stage,status}`，
+  不要和 `cron_task_*` 混成一张图。不要自己再发明一套指标命名。
 - **要不要跑定时任务应该做成配置项**，不是所有环境都需要（比如多副本部署，通常只想让
   一个副本/一个单独的 worker 角色跑定时任务）。这条决策放在 bootstrap 层（读配置，决定
   要不要调用 `RegisterSingleton`），不要下沉进 `pkg/frame/cron` 本身——`cron.Component`
@@ -397,12 +400,12 @@ body**（这种情况很少见，读 body 的需求几乎都应该走 `reqctx.Fr
   期间 `Get()` 永远是纯内存读，没有任何网络往返。
 
 **和 `pkg/frame/cron` 的关系（这是设计上最容易被问到的一点）**：`refreshcache.Cache[T]`
-内部**用 `cron.NewComponent` 调度**两条刷新链路，不是重新发明一套定时器；cron 只解决
-"什么时候跑"，`refreshcache` 补的是 cron 不管的三件事——类型安全的内存存储容器、
-"从来没加载过"时的同步兜底、以及"Redis 不可用时内存层直接回退到数据源"这条三层回退逻辑。
-单独用 cron 搭不出这个模式（没有存储/回退这层职责），但也不需要给 `refreshcache` 再写
-一套独立的调度代码——组合优于重新发明，这也是为什么 `refreshcache.Cache[T]` 直接把
-`Collectors()` 转发给内部的 `cron.Component`，两个包共用同一套执行指标格式。
+内部**用 `cron.NewComponent` 调度**两条刷新链路（`WithoutMetrics`），不是重新发明一套
+定时器。cron 只解决"什么时候跑"；缓存刷新和业务定时任务不是同一个概念，所以
+`Collectors()` 交的是 `refreshcache_refresh_total{cache,stage,status}`，不是
+`cron_task_*`。`refreshcache` 另外补的是 cron 不管的三件事——类型安全的内存存储容器、
+"从来没加载过"时的同步兜底、以及"Redis 不可用时内存层直接回退到数据源"。
+单独用 cron 搭不出这个模式，但也不需要再写一套调度代码。
 
 参考实现：`pkg/frame/refreshcache/refreshcache.go` 包文档；真实业务场景演示见
 `internal/example/cache/product_cache.go`（缓存"当前上架产品数量"）+
