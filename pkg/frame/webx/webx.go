@@ -1,4 +1,8 @@
 // Package webx 提供 HTTP 绑定与统一响应：Bind / Success / Fail。
+//
+// 绑定入口按参数来源区分：Bind（按 Content-Type 自动选）、BindQuery、BindJSON、BindURI，
+// 以及给历史客户端兜底的 BindWithQueryFallback。四个正常入口都会在绑定成功后跑一次
+// pkg/frame/validate 校验。
 package webx
 
 import (
@@ -15,10 +19,17 @@ import (
 	"go.uber.org/zap"
 )
 
-var onFailHook atomic.Pointer[func(route string, err *errs.Error)]
+var onFailHook atomic.Pointer[func(c *gin.Context, err *errs.Error)]
 
 // SetOnFail 注册错误响应钩子，在写响应之前调用。传 nil 清空。
-func SetOnFail(fn func(route string, err *errs.Error)) {
+//
+// 回调拿到的是整个 *gin.Context 而不只是路由：路由用 c.FullPath() 就有，而客户端 IP、
+// UA、Content-Length 这些只有 Context 里才有——像「请求体超限」这类告警，不知道是谁在
+// 打大包基本没有处置价值。
+//
+// 回调在响应写出之前同步执行，不要在里面做慢操作（发 webhook 请自己起 goroutine，
+// 或者走 pkg/alert，它内部已经是异步 + 并发上限）。
+func SetOnFail(fn func(c *gin.Context, err *errs.Error)) {
 	if fn == nil {
 		onFailHook.Store(nil)
 		return
@@ -84,7 +95,7 @@ func respond(c *gin.Context, e *errs.Error, status int) {
 	logFailure(c, e)
 
 	if hook := onFailHook.Load(); hook != nil {
-		(*hook)(c.FullPath(), e)
+		(*hook)(c, e)
 	}
 
 	resp := Response{
@@ -150,6 +161,24 @@ func BindJSON(c *gin.Context, req any) error {
 func BindURI(c *gin.Context, req any) error {
 	if err := c.ShouldBindUri(req); err != nil {
 		return errs.Wrap(errs.CodeInvalidParams, err, "路径参数格式错误")
+	}
+	return runValidate(req)
+}
+
+// BindWithQueryFallback 与 Bind 相同，但 body 解析失败时再回退读一次 query string。
+//
+// 只给「POST 请求的 body 可能整个丢失」的历史客户端用。已知场景：部分手机浏览器
+// （iOS 上的 QQ 浏览器是常见一例）在页面跳转时会把 POST body 丢掉，只剩 URL 上的 query。
+// 这类客户端已经发出去了改不动，只能服务端两边都认。
+//
+// 注意 body 解析失败时 req 可能已经被填了一半，回退的 query 绑定只覆盖 query 里出现的
+// 字段，残留值会保留——这与历史实现一致，也是这个兼容本身固有的模糊之处。
+// 两次都失败时返回 body 的错误，它比 query 的错误更能说明客户端发了什么。
+func BindWithQueryFallback(c *gin.Context, req any) error {
+	if err := c.ShouldBind(req); err != nil {
+		if fallbackErr := c.ShouldBindQuery(req); fallbackErr != nil {
+			return errs.Wrap(errs.CodeInvalidParams, err, "请求参数格式错误")
+		}
 	}
 	return runValidate(req)
 }

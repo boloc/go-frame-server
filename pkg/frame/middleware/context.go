@@ -32,7 +32,9 @@ func ContextMiddleware() gin.HandlerFunc {
 			// 只有确实是 MaxBodyBytes 触发的 *http.MaxBytesError 才回 413；客户端中途断开、
 			// 网络读错误等其它情况回 400，否则监控里的 413 会把两种完全不同的问题混在一起。
 			if _, isTooLarge := errors.AsType[*http.MaxBytesError](err); isTooLarge {
-				webx.FailWithStatus(c, errs.RequestTooLarge("请求体超过大小限制"))
+				// 用 Wrap 而不是 RequestTooLarge：把 *http.MaxBytesError 留在 Err 里，
+				// SetOnFail 的回调才能取出 Limit 报出「限制多少、客户端发了多少」。
+				webx.FailWithStatus(c, errs.Wrap(errs.CodeRequestTooLarge, err, "请求体超过大小限制"))
 			} else {
 				webx.FailWithStatus(c, errs.Wrap(errs.CodeInvalidParams, err, "请求体读取失败"))
 			}

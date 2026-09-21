@@ -16,6 +16,7 @@ import (
 	"github.com/boloc/go-frame-server/v2/pkg/frame/config"
 	"github.com/boloc/go-frame-server/v2/pkg/frame/webx"
 	"github.com/boloc/go-frame-server/v2/pkg/logger"
+	"github.com/gin-gonic/gin"
 )
 
 // main 展示框架推荐的装配顺序：先显式解析并加载配置，再创建 Frame、注册组件、运行。
@@ -40,10 +41,12 @@ func main() {
 	)
 
 	// webx.Fail 默认 HTTP 200（业务码在 body.code）。OnFail 比 alert.Event 更精确
-	// （能拿到 route + *errs.Error），适合做请求级错误率统计；alert 覆盖后台/异步失败。
-	webx.SetOnFail(func(route string, err *errs.Error) {
+	// （能拿到 *gin.Context + *errs.Error），适合做请求级错误率统计和「按错误码分流告警」；
+	// alert 覆盖后台/异步失败。
+	webx.SetOnFail(func(c *gin.Context, err *errs.Error) {
 		logger.Warn("webx: on_fail",
-			logger.String("route", route),
+			logger.String("route", c.FullPath()),
+			logger.String("client_ip", c.ClientIP()),
 			logger.Int("code", int(err.Code)),
 			logger.String("message", err.Message),
 			logger.String("caller", err.Caller),
@@ -60,8 +63,6 @@ func main() {
 	bootstrap.Setup(f, conf)
 
 	// 统一失败通知：框架各处的 alert.Notify 都会进这个 Hook。
-	// 真实项目按 e.Scope 分发到飞书/钉钉/Slack webhook，不要在 Hook 里同步做重活。
-	// Dropped() 是并发 Hook 打满 64 后丢弃的累计数，可接进 Prometheus。
 	alert.SetHook(func(_ context.Context, e alert.Event) {
 		fields := []logger.Field{
 			logger.String("scope", e.Scope),

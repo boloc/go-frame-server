@@ -42,19 +42,19 @@ var (
 
 func init() {
 	dm := map[Code]string{
-		CodeOK:              "success",
-		CodeInvalidParams:   "请求参数不合法",
-		CodeUnauthorized:    "未登录或登录已过期",
-		CodeForbidden:       "没有权限执行该操作",
-		CodeNotFound:        "资源不存在",
-		CodeConflict:        "操作冲突，请刷新后重试",
-		CodeRequestTooLarge: "请求体过大",
-		CodeTooManyRequests: "请求过于频繁，请稍后重试",
-		CodeInternal:        "服务器内部错误",
-		CodeDatabase:        "数据处理失败",
-		CodeCache:           "缓存服务异常",
-		CodeDependency:      "依赖的服务暂时不可用",
-		CodeTimeout:         "请求超时",
+		CodeOK:              "success",                                   // 成功
+		CodeInvalidParams:   "invalid request parameters",                // 请求参数不合法
+		CodeUnauthorized:    "unauthorized or session expired",           // 未登录或登录已过期
+		CodeForbidden:       "permission denied",                         // 没有权限执行该操作
+		CodeNotFound:        "resource not found",                        // 资源不存在
+		CodeConflict:        "conflict, please refresh and retry",        // 操作冲突，请刷新后重试
+		CodeRequestTooLarge: "request body too large",                    // 请求体过大
+		CodeTooManyRequests: "too many requests, please retry later",     // 请求过于频繁，请稍后重试
+		CodeInternal:        "internal server error",                     // 服务器内部错误
+		CodeDatabase:        "data processing failed",                    // 数据处理失败
+		CodeCache:           "cache service unavailable",                 // 缓存服务异常
+		CodeDependency:      "dependent service temporarily unavailable", // 依赖的服务暂时不可用
+		CodeTimeout:         "request timeout",                           // 请求超时
 	}
 	defaultMessageMap.Store(&dm)
 

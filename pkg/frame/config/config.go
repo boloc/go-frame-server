@@ -121,11 +121,11 @@ func (c *ConfigComponent) IsSet(key string) bool {
 // 保留 viper 默认的 DecodeHook，否则 time.Duration / 逗号分隔切片会解不出来。
 func (c *ConfigComponent) StrictUnmarshalKey(key string, out any) error {
 	err := c.viper.UnmarshalKey(key, out, func(dc *mapstructure.DecoderConfig) {
-		dc.ErrorUnused = true
+		dc.ErrorUnused = true // 未知字段报错
 		dc.DecodeHook = mapstructure.ComposeDecodeHookFunc(
-			mapstructure.StringToTimeDurationHookFunc(),
-			mapstructure.StringToSliceHookFunc(","),
-			mapstructure.TextUnmarshallerHookFunc(),
+			mapstructure.StringToTimeDurationHookFunc(), // 时间字符串转 time.Duration
+			mapstructure.StringToSliceHookFunc(","),     // 逗号分隔切片转 []string
+			mapstructure.TextUnmarshallerHookFunc(),     // 文本转 any
 		)
 	})
 	if err != nil {

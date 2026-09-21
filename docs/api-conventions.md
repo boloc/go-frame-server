@@ -52,6 +52,22 @@ type ProductListReq struct {
 
 **这条规则配套了 AST 检查**，见第 4 节。
 
+### 2.0 绑定入口怎么选，以及 `BindWithQueryFallback` 这个例外
+
+正常情况下按参数来源选一个就行：`Bind`（按 Content-Type 自动选）、`BindQuery`、`BindJSON`、`BindURI`。四个都会在绑定成功后自动跑一次 `validate:` tag 校验。
+
+`BindWithQueryFallback` 是第五个，行为是「先按 Content-Type 正常绑定，body 解析失败时再回退读一次 query」。**它只给历史客户端兼容用，新接口一律不要用。**
+
+存在的原因：部分手机浏览器（iOS 上的 QQ 浏览器是常见一例）在页面跳转场景下会把 POST body 丢掉，只剩 URL 上的 query。这类客户端已经发出去了改不动，服务端只能两边都认。
+
+不要把它当默认写法的理由：
+
+- 参数到底从 body 来还是从 query 来，本该是接口契约的一部分。「哪个能解出来算哪个」会让契约变模糊，联调时很难说清。
+- 它会把客户端真正的请求格式错误掩盖成一次静默回退，问题推迟到更靠后的地方才暴露。
+- body 解析失败时请求结构体可能已经被填了一半，回退的 query 绑定只覆盖 query 里出现的字段，残留值会保留。这是这个兼容本身固有的模糊之处，没法消除。
+
+所以用它的地方要在 handler 上写明为什么用，review 时按「有没有真实的历史客户端」来判断，不接受「顺手写上更保险」。
+
 ### 2.1 dto 不实现 `validate.Validatable`，跨字段规则一律放 `validation` 包
 
 `pkg/frame/validate` 除了 tag 校验，还提供了一个 `Validatable` 接口（`Validate() error`），请求结构体实现它之后会被 `webx.Bind` 系列**自动**调用（不需要 handler 显式写调用点）。框架能力演示见 `POST /test/validatable`（结构体活在 handler 文件里，**不**在 `dto` 包）。

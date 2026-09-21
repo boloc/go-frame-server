@@ -56,10 +56,13 @@ func Notify(ctx context.Context, e Event) {
 		return
 	}
 
+	// 非阻塞占用一个 in-flight 槽：成功则后面起 goroutine 调 Hook；
+	// 已满则立刻丢弃，避免 Notify 卡住业务请求或再堆出站 goroutine。
 	select {
 	case inFlight <- struct{}{}:
 	default:
 		n := dropped.Add(1)
+		// 只打首条和每 dropLogEvery 条，防止丢弃风暴把日志也打爆。
 		if n == 1 || n%dropLogEvery == 0 {
 			logger.Warn("alert: too many hooks in flight, dropping event",
 				zap.Uint64("dropped_total", n), zap.Int("max_in_flight", MaxInFlight),
