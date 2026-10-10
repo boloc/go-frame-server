@@ -190,7 +190,8 @@ func runValidate(req any) error {
 
 	if v, ok := req.(validate.Validatable); ok {
 		if err := v.Validate(); err != nil {
-			if e, ok := errors.AsType[*errs.Error](err); ok {
+			var e *errs.Error
+			if errors.As(err, &e) {
 				return e
 			}
 			return errs.InvalidParams(err.Error())

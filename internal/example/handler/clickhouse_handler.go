@@ -10,8 +10,8 @@ import (
 	"github.com/boloc/go-frame-server/v2/pkg/frame/reqctx"
 	"github.com/boloc/go-frame-server/v2/pkg/frame/webx"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
-	"uuid"
 )
 
 var clickhouseDemoOnce sync.Once

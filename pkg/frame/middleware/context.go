@@ -12,7 +12,7 @@ import (
 	"github.com/boloc/go-frame-server/v2/pkg/frame/webx"
 
 	"github.com/gin-gonic/gin"
-	"uuid"
+	"github.com/google/uuid"
 )
 
 // RequestIDHeader 请求/响应头中的请求 ID。这是单次调用的追踪 ID，不是幂等键。
@@ -31,7 +31,8 @@ func ContextMiddleware() gin.HandlerFunc {
 		if err != nil {
 			// 只有确实是 MaxBodyBytes 触发的 *http.MaxBytesError 才回 413；客户端中途断开、
 			// 网络读错误等其它情况回 400，否则监控里的 413 会把两种完全不同的问题混在一起。
-			if _, isTooLarge := errors.AsType[*http.MaxBytesError](err); isTooLarge {
+			var tooLarge *http.MaxBytesError
+			if errors.As(err, &tooLarge) {
 				// 用 Wrap 而不是 RequestTooLarge：把 *http.MaxBytesError 留在 Err 里，
 				// SetOnFail 的回调才能取出 Limit 报出「限制多少、客户端发了多少」。
 				webx.FailWithStatus(c, errs.Wrap(errs.CodeRequestTooLarge, err, "请求体超过大小限制"))

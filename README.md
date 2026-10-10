@@ -1,9 +1,9 @@
 # Go Frame Server
 
-一个轻量级 Go 应用框架（Go 1.27）：统一管理组件生命周期（启动顺序、优雅关闭、SIGHUP 热重启），
+一个轻量级 Go 应用框架（Go 1.23）：统一管理组件生命周期（启动顺序、优雅关闭、SIGHUP 热重启），
 提供常见基础设施（MySQL/Redis/ClickHouse/对象存储）和常见能力（幂等、限流、定时任务、
 双层刷新缓存、健康检查、统一错误/响应、统一失败通知）的开箱即用实现。RequestID、对象存储
-默认对象键等使用标准库 `uuid`。
+默认对象键等使用 `github.com/google/uuid`。
 
 `cmd/example` + `internal/example` 是一个完整的可运行示例应用，本文档提到的每一段代码都
 能在那里找到对应的真实用法。

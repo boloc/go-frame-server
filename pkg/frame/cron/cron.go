@@ -15,9 +15,9 @@ import (
 	"github.com/boloc/go-frame-server/v2/pkg/frame"
 	"github.com/boloc/go-frame-server/v2/pkg/frame/rediskey"
 	"github.com/boloc/go-frame-server/v2/pkg/logger"
-	gocron "github.com/netresearch/go-cron"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/redis/go-redis/v9"
+	gocron "github.com/robfig/cron/v3"
 	"go.uber.org/zap"
 )
 
@@ -106,7 +106,8 @@ type Component struct {
 	tasks []Task
 	redis func() (redis.Cmdable, bool)
 
-	engine *gocron.Cron
+	engine   *gocron.Cron
+	stopJobs context.CancelFunc
 
 	metricsOff bool
 	runsTotal  *prometheus.CounterVec
@@ -208,6 +209,15 @@ func (c *Component) Start(_ context.Context) error {
 		return nil
 	}
 
+	// robfig/cron 的任务函数不接收 context。这里用一个随 Stop 取消的根 context，
+	// 让正在跑的任务能看到取消，和原先 go-cron 的 FuncJobWithContext 一样。
+	jobCtx, stopJobs := context.WithCancel(context.Background())
+	defer func() {
+		if c.stopJobs == nil {
+			stopJobs()
+		}
+	}()
+
 	// 创建一个定时任务调度器
 	engine := gocron.New(gocron.WithSeconds(), gocron.WithChain(
 		gocron.Recover(logAdapter{}),
@@ -234,13 +244,15 @@ func (c *Component) Start(_ context.Context) error {
 		}
 		seen[task.Name] = true
 
-		job := gocron.FuncJobWithContext(c.wrap(task))
-		if _, err := engine.AddJob(task.Schedule, job, gocron.WithName(task.Name)); err != nil {
+		if _, err := engine.AddJob(task.Schedule, gocron.FuncJob(func() {
+			c.wrap(task)(jobCtx)
+		})); err != nil {
 			return fmt.Errorf("cron: 注册任务 %q 失败（Schedule=%q）: %w", task.Name, task.Schedule, err)
 		}
 	}
 
 	c.engine = engine
+	c.stopJobs = stopJobs
 	c.engine.Start()
 	logger.Info("cron: scheduler started", zap.Int("tasks", len(c.tasks)))
 	return nil
@@ -410,6 +422,9 @@ func newLockToken() (string, error) {
 func (c *Component) Stop(ctx context.Context) error {
 	if c.engine == nil {
 		return nil
+	}
+	if c.stopJobs != nil {
+		c.stopJobs()
 	}
 
 	stopped := c.engine.Stop()
