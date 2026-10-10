@@ -8,7 +8,7 @@ Cloudflare R2、MinIO、Backblaze B2 等。
 ### Cloudflare R2（`storage.R2Config`）
 
 | 字段 | 从哪里拿 |
-|---|---|
+| --- | --- |
 | `AccountID` | Cloudflare 控制台右侧栏（R2 概览页也会显示），或者直接看你账号下任意一个 R2 存储桶详情页 URL 里 `accounts/<这一段>` |
 | `AccessKeyID` / `AccessKeySecret` | R2 → **管理 R2 API 令牌** → 创建 API 令牌，权限选"对象读和写"，创建后立刻复制（Secret 只显示一次，关闭弹窗前务必保存） |
 | `BucketName` | R2 → 你要用的存储桶名称，没有就先创建一个 |
@@ -18,7 +18,7 @@ Cloudflare R2、MinIO、Backblaze B2 等。
 ### 真正的 AWS S3 / MinIO 等其它 S3 兼容服务（`storage.S3Config`）
 
 | 字段 | 从哪里拿 |
-|---|---|
+| --- | --- |
 | `AccessKeyID` / `AccessKeySecret` | AWS：IAM → 用户 → 安全凭证 → 创建访问密钥（建议只授予目标桶的读写权限，不要用根账号密钥）。MinIO：控制台或 `mc admin user` 创建的密钥 |
 | `BucketName` | 目标桶名 |
 | `Region` | AWS：桶所在的真实区域（如 `us-east-1`、`ap-southeast-1`），在桶详情页能看到。MinIO/其它兼容服务：随便填一个非空值即可，服务端通常不校验 |

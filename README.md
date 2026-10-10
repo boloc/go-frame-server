@@ -12,30 +12,22 @@
 
 每份文档只覆盖一类问题。路径和配置 key 以代码为准，文档不另造别名。
 
-
-| 文档                                                                     | 角色        | 你在这里找什么                 | 权威出处                                      |
-| ---------------------------------------------------------------------- | --------- | ----------------------- | ----------------------------------------- |
-| 本文                                                                     | 总览        | 框架是什么、装哪些组件、生产检查清单      | `pkg/frame`、`cmd/example`                 |
-| `[docs/dev-commands.md](docs/dev-commands.md)`                         | How-to    | 启动、清端口、探活、复制即用 curl | `config/frame-server.yml` 的 `server.port` |
-| `[docs/api-conventions.md](docs/api-conventions.md)`                   | 团队规范      | 命名、分层、校验、幂等/限流/访问器      | `cmd/example` + `internal/example`        |
-| `[docs/example-apifox.openapi.json](docs/example-apifox.openapi.json)` | API 参考    | 导入 Apifox：路径、请求头、字段、错误码 | `cmd/example/route` + dto/handler         |
-| `[config/frame-server.yml.example](config/frame-server.yml.example)`   | 配置参考      | 键名和示例默认值（端口示例是 `10005`） | 复制为 `config/frame-server.yml`             |
-| `[pkg/frame/storage/README.md](pkg/frame/storage/README.md)`           | 存储 How-to | 对象存储接入                  | `pkg/frame/storage`                       |
-
-
-
+| 文档 | 角色 | 你在这里找什么 | 权威出处 |
+| --- | --- | --- | --- |
+| 本文 | 总览 | 框架是什么、装哪些组件、生产检查清单 | `pkg/frame`、`cmd/example` |
+| `[docs/dev-commands.md](docs/dev-commands.md)` | How-to | 启动、清端口、探活、复制即用 curl | `config/frame-server.yml` 的 `server.port` |
+| `[docs/api-conventions.md](docs/api-conventions.md)` | 团队规范 | 命名、分层、校验、幂等/限流/访问器 | `cmd/example` + `internal/example` |
+| `[docs/example-apifox.openapi.json](docs/example-apifox.openapi.json)` | API 参考 | 导入 Apifox：路径、请求头、字段、错误码 | `cmd/example/route` + dto/handler |
+| `[config/frame-server.yml.example](config/frame-server.yml.example)` | 配置参考 | 键名和示例默认值（端口示例是 `10005`） | 复制为 `config/frame-server.yml` |
+| `[pkg/frame/storage/README.md](pkg/frame/storage/README.md)` | 存储 How-to | 对象存储接入 | `pkg/frame/storage` |
 
 ## 快速开始
-
-
 
 ### 1. 安装
 
 ```bash
 go get github.com/boloc/go-frame-server/v2
 ```
-
-
 
 ### 2. 最小示例
 
@@ -130,18 +122,14 @@ config.Resolve("./config/frame-server.yml")  # 代码里的默认值
 
 ## 组件与能力一览
 
-
-
 ### 基础设施组件（`pkg/frame/components`，通过 `pkg/frame` 顶层函数访问）
 
-
-| 组件         | 说明                                                                                                                                                                                                                               | 示例位置                                                                                                                                                                             |
-| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| MySQL      | 主从分离、连接失败重试、同一进程多个命名实例。表名前缀来自 `database.<name>.prefix`；`SystemConfig`（config_db）和 `OperationLog`（log_db）不实现 `TableName()`，走 GORM 默认命名策略。panic 版访问器用在启动期和「服务期一定连着」的 repository；可选依赖或探测用 `Try*`，见 [访问器约定](docs/api-conventions.md) | `cmd/example/bootstrap/mysql.go`；从库读/主库写：`internal/example/repository/product_repository.go`；命名实例：`system_config_repository.go`（config_db）、`operation_log_repository.go`（log_db） |
-| Redis      | 单机/集群/哨兵，业务统一 `frame.GetRedisCmdable()` / `TryGetRedisCmdable()`。go-redis 内部日志经 `pkg/logger`（Warn，`component=redis`）落地                                                                                                           | `cmd/example/bootstrap/redis.go`；被幂等、限流、`cron.Task.Exclusive`、refreshcache 使用                                                                                                    |
-| ClickHouse | 原生驱动 + GORM。示例走 GORM：`components.TryDefaultClickHouseDB`                                                                                                                                                                         | `cmd/example/bootstrap/clickhouse.go`；读写：`POST /test/clickhouse/events`                                                                                                          |
-| Gin        | HTTP 服务，内置 MaxBodyBytes、RequestTimeout、TrustedProxies、路由只注册一次                                                                                                                                                                    | `cmd/example/bootstrap/gin.go`                                                                                                                                                   |
-
+| 组件 | 说明 | 示例位置 |
+| --- | --- | --- |
+| MySQL | 主从分离、连接失败重试、同一进程多个命名实例。表名前缀来自 `database.<name>.prefix`；`SystemConfig`（config_db）和 `OperationLog`（log_db）不实现 `TableName()`，走 GORM 默认命名策略。panic 版访问器用在启动期和「服务期一定连着」的 repository；可选依赖或探测用 `Try*`，见 [访问器约定](docs/api-conventions.md) | `cmd/example/bootstrap/mysql.go`；从库读/主库写：`internal/example/repository/product_repository.go`；命名实例：`system_config_repository.go`（config_db）、`operation_log_repository.go`（log_db） |
+| Redis | 单机/集群/哨兵，业务统一 `frame.GetRedisCmdable()` / `TryGetRedisCmdable()`。go-redis 内部日志经 `pkg/logger`（Warn，`component=redis`）落地 | `cmd/example/bootstrap/redis.go`；被幂等、限流、`cron.Task.Exclusive`、refreshcache 使用 |
+| ClickHouse | 原生驱动 + GORM。示例走 GORM：`components.TryDefaultClickHouseDB` | `cmd/example/bootstrap/clickhouse.go`；读写：`POST /test/clickhouse/events` |
+| Gin | HTTP 服务，内置 MaxBodyBytes、RequestTimeout、TrustedProxies、路由只注册一次 | `cmd/example/bootstrap/gin.go` |
 
 ```go
 db     := frame.DefaultDB()                 // 默认实例主库，未连接时 panic
@@ -150,51 +138,41 @@ db     := frame.MasterDB("config_db")        // 命名实例
 rdb    := frame.GetRedisCmdable()           // 通用 Redis 接口，自动适配单机/集群/哨兵
 ```
 
-
-
 ### 通用能力
 
-
-| 能力         | 包路径                                     | 说明                                                                                              | 示例位置                                                                                                    |
-| ---------- | --------------------------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| 统一响应/绑定/校验 | `pkg/frame/webx`                        | `Success` / `Fail` / `FailWithStatus` + `Bind*`；`SetOnFail`、`IncludeCallerInResponse`、`BizCode` | `/test/success`、`/test/not-found`、`/test/not-found-with-status`；钩子与 Caller 开关：`cmd/example/main.go`     |
-| 统一错误类型     | `pkg/errs`                              | `*errs.Error`；`RegisterHTTPStatus` / `RegisterMessage`                                          | `/test/business-error` + `internal/example/bizerr`                                                      |
-| 幂等         | `pkg/frame/idempotency`                 | Redis `SETNX`；`Required` / `FailOpen` / `WithScopeFunc`                                         | `POST /api/orders`（`cmd/example/route/order_route.go`）                                                  |
-| 限流         | `pkg/frame/ratelimit`                   | Redis + Lua 固定窗口；必须显式 `WithLimit`/`WithWindow`。中间件可挂在组上，计数按路由 `FullPath` × ClientIP，不是整组共用一个桶   | `/api/products` 组（`cmd/example/route/product_route.go`）                                                 |
-| 定时任务       | `pkg/frame/cron`                        | 防并发重入、执行指标、优雅关闭；`Exclusive` 走 Redis 锁                                                           | `cmd/example/cron/cron.go`；`GET /api/cron/tasks`                                                        |
-| 双层刷新只读缓存   | `pkg/frame/refreshcache`                | 数据源 → Redis → 内存；`Get` 内存未就绪才回落 Loader；`Jitter` 错开刷新                                            | `GET /api/products/summary`、详情页公告 `GET /api/products/:id`                                               |
-| Redis key 命名空间 | `pkg/frame/rediskey`                  | 命名空间由应用注入（取 `server.name`），框架不给默认值；四类能力自动拼，业务 key 用 `App` 显式拼                                     | `cmd/example/bootstrap/redis.go`；`GET /test/redis-key`                                                   |
-| 健康检查       | `pkg/frame/healthcheck`                 | `/livez` 存活；`/readyz`（及兼容别名 `/health`）就绪                                                        | `cmd/example/route/route.go`                                                                            |
-| 统一失败通知     | `pkg/alert`                             | 全局单 Hook；`Dropped()` 是打满 64 并发后的丢弃计数                                                            | `cmd/example/main.go` 的 `alert.SetHook`；`GET /test/alert-dropped`                                       |
-| 对象存储       | `pkg/frame/storage`                     | S3 兼容客户端                                                                                        | `/test/storage/*`（`cmd/example/route/storage_route.go`）                                                 |
-| 进程时区       | `pkg/util.SetProcessTimezone`           | 设置 `time.Local`；展示时间用 `util.FormatLocal`                                                        | `cmd/example/bootstrap/timezone.go`；`GET /test/timezone`                                                |
-| 分页         | `pkg/frame/pagination`                  | GORM scope + 统一分页请求/响应                                                                          | `GET /api/products/list`                                                                                |
-| 参数校验       | `pkg/frame/validate`                    | `validate:` tag；可选 `Validatable`                                                                | tag：`GET /test/validation-error`；`Validatable`：`POST /test/validatable`；validation 层：`POST /api/orders` |
-| 请求上下文      | `pkg/frame/reqctx`                      | RequestID / ClientIP / RequestBody / CustomData                                                 | `GET`/`POST /test/reqctx`                                                                               |
-| 出站 HTTP    | `pkg/util.GetClient` / `GetNamedClient` | resty 客户端，默认重试幂等方法                                                                              | `/test/http-client/*`                                                                                   |
-| 枚举下拉       | `pkg/util/options`                      | 一次 `Put` 同时拿列表和查找表                                                                              | `GET /api/products/options`（`internal/example/enum/product.go`）                                         |
-| 集合辅助       | `pkg/util/maps`                         | `MapBuilder` / `SliceToMap` / `GetOrDefault` 等                                                  | `GET /test/maps`                                                                                        |
-| 日志         | `pkg/logger`                            | 字段化 `logger.Info(..., logger.String(...))`；`WithLoggerStdoutJSON`                                  | `cmd/example/bootstrap/logger.go`；`GET /test/logger`                                                    |
-| 进程指标       | `pkg/monitor`                           | 内存/goroutine 采集 + `HTTPMetrics` + `/metrics` Basic Auth                                         | `cmd/example/bootstrap/monitor.go`                                                                      |
-
-
-
+| 能力 | 包路径 | 说明 | 示例位置 |
+| --- | --- | --- | --- |
+| 统一响应/绑定/校验 | `pkg/frame/webx` | `Success` / `Fail` / `FailWithStatus` + `Bind*`；`SetOnFail`、`IncludeCallerInResponse`、`BizCode` | `/test/success`、`/test/not-found`、`/test/not-found-with-status`；钩子与 Caller 开关：`cmd/example/main.go` |
+| 统一错误类型 | `pkg/errs` | `*errs.Error`；`RegisterHTTPStatus` / `RegisterMessage` | `/test/business-error` + `internal/example/bizerr` |
+| 幂等 | `pkg/frame/idempotency` | Redis `SETNX`；`Required` / `FailOpen` / `WithScopeFunc` | `POST /api/orders`（`cmd/example/route/order_route.go`） |
+| 限流 | `pkg/frame/ratelimit` | Redis + Lua 固定窗口；必须显式 `WithLimit`/`WithWindow`。中间件可挂在组上，计数按路由 `FullPath` × ClientIP，不是整组共用一个桶 | `/api/products` 组（`cmd/example/route/product_route.go`） |
+| 定时任务 | `pkg/frame/cron` | 防并发重入、执行指标、优雅关闭；`Exclusive` 走 Redis 锁 | `cmd/example/cron/cron.go`；`GET /api/cron/tasks` |
+| 双层刷新只读缓存 | `pkg/frame/refreshcache` | 数据源 → Redis → 内存；`Get` 内存未就绪才回落 Loader；`Jitter` 错开刷新 | `GET /api/products/summary`、详情页公告 `GET /api/products/:id` |
+| Redis key 命名空间 | `pkg/frame/rediskey` | 命名空间由应用注入（取 `server.name`），框架不给默认值；四类能力自动拼，业务 key 用 `App` 显式拼 | `cmd/example/bootstrap/redis.go`；`GET /test/redis-key` |
+| 健康检查 | `pkg/frame/healthcheck` | `/livez` 存活；`/readyz`（及兼容别名 `/health`）就绪 | `cmd/example/route/route.go` |
+| 统一失败通知 | `pkg/alert` | 全局单 Hook；`Dropped()` 是打满 64 并发后的丢弃计数 | `cmd/example/main.go` 的 `alert.SetHook`；`GET /test/alert-dropped` |
+| 对象存储 | `pkg/frame/storage` | S3 兼容客户端 | `/test/storage/*`（`cmd/example/route/storage_route.go`） |
+| 进程时区 | `pkg/util.SetProcessTimezone` | 设置 `time.Local`；展示时间用 `util.FormatLocal` | `cmd/example/bootstrap/timezone.go`；`GET /test/timezone` |
+| 分页 | `pkg/frame/pagination` | GORM scope + 统一分页请求/响应 | `GET /api/products/list` |
+| 参数校验 | `pkg/frame/validate` | `validate:` tag；可选 `Validatable` | tag：`GET /test/validation-error`；`Validatable`：`POST /test/validatable`；validation 层：`POST /api/orders` |
+| 请求上下文 | `pkg/frame/reqctx` | RequestID / ClientIP / RequestBody / CustomData | `GET`/`POST /test/reqctx` |
+| 出站 HTTP | `pkg/util.GetClient` / `GetNamedClient` | resty 客户端，默认重试幂等方法 | `/test/http-client/*` |
+| 枚举下拉 | `pkg/util/options` | 一次 `Put` 同时拿列表和查找表 | `GET /api/products/options`（`internal/example/enum/product.go`） |
+| 集合辅助 | `pkg/util/maps` | `MapBuilder` / `SliceToMap` / `GetOrDefault` 等 | `GET /test/maps` |
+| 日志 | `pkg/logger` | 字段化 `logger.Info(..., logger.String(...))`；`WithLoggerStdoutJSON` | `cmd/example/bootstrap/logger.go`；`GET /test/logger` |
+| 进程指标 | `pkg/monitor` | 内存/goroutine 采集 + `HTTPMetrics` + `/metrics` Basic Auth | `cmd/example/bootstrap/monitor.go` |
 
 ### 中间件（`pkg/frame/middleware`）
 
-
-| 中间件                      | 说明                                                            | 示例位置                                                                  |
-| ------------------------ | ------------------------------------------------------------- | --------------------------------------------------------------------- |
-| `ContextMiddleware`      | 生成/回显 `X-Request-Id`，捕获请求体供 `reqctx` 使用                       | `cmd/example/bootstrap/gin.go`；字段演示 `/test/reqctx`                    |
-| `AccessLog`              | 结构化访问日志（含 `biz_code`、`request_id`、耗时）；默认跳过探针和 `/metrics`      | `cmd/example/bootstrap/gin.go`（`WithSlowThreshold(1s)`）               |
-| `MaxBodyBytes`           | 限制单次请求体大小（GinComponent 默认 4MB）                                | 由 `NewGinComponent` 内置挂载；演示 `POST /test/body-limit`                   |
-| `RequestTimeout`         | 给请求 `ctx` 挂整体超时，不写响应                                          | 由 `NewGinComponent` 按 `server.request_timeout` 挂载；演示 `GET /test/slow` |
-| `monitor.HTTPMetrics`    | `http_requests_total` / duration / in-flight，读 `webx.BizCode` | `cmd/example/bootstrap/gin.go`                                        |
-| `idempotency.Middleware` | 按路由/分组挂载，不要做成全局中间件                                            | `POST /api/orders`                                                    |
-| `ratelimit.Middleware`   | 按路由/分组挂载；默认 key = `FullPath` + ClientIP                       | `/api/products` 组；每条路径各自 10 次/分钟                                      |
-
-
-
+| 中间件 | 说明 | 示例位置 |
+| --- | --- | --- |
+| `ContextMiddleware` | 生成/回显 `X-Request-Id`，捕获请求体供 `reqctx` 使用 | `cmd/example/bootstrap/gin.go`；字段演示 `/test/reqctx` |
+| `AccessLog` | 结构化访问日志（含 `biz_code`、`request_id`、耗时）；默认跳过探针和 `/metrics` | `cmd/example/bootstrap/gin.go`（`WithSlowThreshold(1s)`） |
+| `MaxBodyBytes` | 限制单次请求体大小（GinComponent 默认 4MB） | 由 `NewGinComponent` 内置挂载；演示 `POST /test/body-limit` |
+| `RequestTimeout` | 给请求 `ctx` 挂整体超时，不写响应 | 由 `NewGinComponent` 按 `server.request_timeout` 挂载；演示 `GET /test/slow` |
+| `monitor.HTTPMetrics` | `http_requests_total` / duration / in-flight，读 `webx.BizCode` | `cmd/example/bootstrap/gin.go` |
+| `idempotency.Middleware` | 按路由/分组挂载，不要做成全局中间件 | `POST /api/orders` |
+| `ratelimit.Middleware` | 按路由/分组挂载；默认 key = `FullPath` + ClientIP | `/api/products` 组；每条路径各自 10 次/分钟 |
 
 ## 分层与编码约定
 
@@ -216,17 +194,13 @@ DATETIME 裸字符串，`time_zone` 决定服务端 `NOW()` / 列默认值；两
 - 把一个 `time.Time` 展示给用户，统一用 `util.FormatLocal(t)`（先转换到 `time.Local` 再
 格式化），不要直接对数据库读出来的值调 `.Format()`。对照见 `GET /test/timezone`。
 
-
-
 ## 健康检查：`/livez` 与 `/readyz`
 
-
-| 路径            | handler                    | 接到                                                                                                |
-| ------------- | -------------------------- | ------------------------------------------------------------------------------------------------- |
-| `GET /livez`  | `healthcheck.Liveness()`   | k8s **livenessProbe**。进程活着就 200，不检查依赖。                                                            |
+| 路径 | handler | 接到 |
+| --- | --- | --- |
+| `GET /livez` | `healthcheck.Liveness()` | k8s **livenessProbe**。进程活着就 200，不检查依赖。 |
 | `GET /readyz` | `healthcheck.Handler(...)` | k8s **readinessProbe**。关键依赖（示例里是 default_db / config_db / redis）失败返回 503，摘流量；log_db 为非关键，失败不影响就绪。 |
-| `GET /health` | 与 `/readyz` 同一 handler     | 兼容别名，不要接到 liveness。                                                                               |
-
+| `GET /health` | 与 `/readyz` 同一 handler | 兼容别名，不要接到 liveness。 |
 
 不要把 `/readyz` 接到 liveness：Redis 一挂 k8s 会把所有 Pod 循环重启。装配见
 `cmd/example/route/route.go`。
@@ -295,8 +269,6 @@ ERROR；`server.env: production` 时只记 SQL 错误，慢查询要看的话把
 - 访问日志（`middleware.AccessLog`）和 HTTP 指标（`monitor.HTTPMetrics`）在示例里默认
 挂在 `ContextMiddleware` 之后。生产环境用 AccessLog，不要依赖 DebugMode 下的 `gin.Logger()`。
 
-
-
 ## 深入了解
 
 - `[docs/dev-commands.md](docs/dev-commands.md)`：本地启动、清端口、探活、常用 curl。
@@ -304,8 +276,6 @@ ERROR；`server.env: production` 时只记 SQL 错误，慢查询要看的话把
 - `[docs/example-apifox.openapi.json](docs/example-apifox.openapi.json)`：示例应用 HTTP 契约，导入 Apifox。
 - `[pkg/frame/storage/README.md](pkg/frame/storage/README.md)`：对象存储客户端的配置项/接入指南。
 - `cmd/example` + `internal/example`：完整可运行的示例应用，覆盖本文档提到的每一项能力，直接 `go run` 起来对照着看最直观。
-
-
 
 ## License
 

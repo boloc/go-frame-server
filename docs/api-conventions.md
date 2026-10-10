@@ -79,7 +79,7 @@ type ProductListReq struct {
 - `internal/example/dto/order_dto.go` + `internal/example/validation/order_validation.go` 就是唯二两层职责的真实示例：`OrderCreateReq` 只有 tag，没有 `Validate()`；"该产品是否已下架"这种跨字段/业务规则显式写在 `ValidateOrderCreate`，由 `handler.OrderCreate` 显式调用一次。这是本项目业务接口唯一认可的模式。
 
 | | `validate:` tag | `validate.Validatable` | `internal/<domain>/validation` |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 谁调用 | `webx.Bind*` 自动 | `webx.Bind*` 在 tag 通过后自动 | handler **显式**调用 |
 | 适合 | 单字段格式 | 框架能力（演示接口可以） | 业务跨字段/运营规则（不查库） |
 | 业务 dto | 必须用 | **禁止** | 必须用这一层 |
@@ -148,7 +148,7 @@ type ProductItem struct { ... }
 **为什么这两个概念不能混用：**
 
 | | `X-Request-Id` / `RequestID` | `Idempotency-Key` |
-|---|---|---|
+| --- | --- | --- |
 | 语义 | "这一次 HTTP 调用" | "这一次业务操作意图" |
 | 生成方 | 客户端没传时，框架（`ContextMiddleware`）会自动生成一个 | 只能由客户端生成，框架不生成、不代替 |
 | 多次重试是否应该相同 | 通常不需要——每次调用可以是新值，只用于日志/链路追踪串联 | 必须相同——服务端靠这个值判断"这是不是同一个操作的第 N 次尝试" |
@@ -353,7 +353,7 @@ body**（这种情况很少见，读 body 的需求几乎都应该走 `reqctx.Fr
 ### 8.4 一张总表
 
 | 顺序 | 中间件 | 挂载方式 | 前置要求 |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | 1 | `gin.Logger()` / `gin.CustomRecoveryWithWriter` | `GinComponent` 内置 | 无 |
 | 2 | `middleware.MaxBodyBytes` | `GinComponent` 内置 | 必须在任何读 body 的中间件之前 |
 | 3 | `middleware.RequestTimeout` | `GinComponent` 内置 | 无强制要求，建议靠前 |
@@ -444,7 +444,7 @@ body**（这种情况很少见，读 body 的需求几乎都应该走 `reqctx.Fr
 **再说"SQL 还是 model"——这不是二选一，是"看环境、看变更类型"：**
 
 | | GORM `AutoMigrate`（model 驱动） | 版本化 SQL 迁移（`golang-migrate`/`goose` 之类） |
-|---|---|---|
+| --- | --- | --- |
 | 能做什么 | 新增表、新增列、新增索引 | 任意 DDL：改列名、改类型、删列、多步骤的 expand-contract |
 | 不能做什么 | **不会**重命名列（改了 struct 字段名会变成"新增一列"，旧列留着不动）、**不会**删除列/表、**不会**收窄类型 | 没有限制，但要自己写对 |
 | 历史/回滚 | 没有——每次都是"当前 struct 和当前表结构做 diff" | 有迁移历史表，大部分工具支持 `up`/`down` |
@@ -488,7 +488,7 @@ body**（这种情况很少见，读 body 的需求几乎都应该走 `reqctx.Fr
 按依赖是不是「这个进程活着就必须连着」来选，不要在 README 和业务代码里各说一套。
 
 | 场景 | 用哪套 | 为什么 |
-|---|---|---|
+| --- | --- | --- |
 | 启动装配、健康检查、可选组件探测 | `Try*` | 没连上返回 `(nil, false)`，由调用方决定跳过、降级或让 Start 失败 |
 | 请求期 repository / logic，且该依赖是服务运行的前提（本示例的 MySQL） | panic 版 | 服务期连着是不变量；真断了 Gin recover 成 500，比每个方法写 `if !ok` 更吵、更短 |
 | 请求期可选能力（ClickHouse、对象存储、按配置关闭的子系统） | `Try*` | 未启用必须回业务错误，不能 panic。见 `POST /test/clickhouse/events`、`/test/storage/*` |

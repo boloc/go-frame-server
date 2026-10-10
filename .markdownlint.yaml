@@ -1,0 +1,13 @@
+# Markdown 文档格式约束。
+# 只启用下面两条：和编辑器里要消掉的诊断一致。
+# 不启用 MD013（80 列）：中文说明本来就会超长。
+# 不启用 MD010（制表符）：Go 示例代码块使用 tab。
+default: false
+
+# MD012/no-multiple-blanks：连续空行最多一行。
+MD012: true
+
+# MD060/table-column-style：表格用 compact。
+# 单元格两侧各一个空格，分隔行写 `| --- |`，不要用空格把列对齐。
+MD060:
+  style: compact
