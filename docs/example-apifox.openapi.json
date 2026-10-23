@@ -1,6 +1,6 @@
 {
   "info": {
-    "description": "cmd/example 的 HTTP 接口文档。导入本文件即可（导入 → OpenAPI/Swagger）。\n\n不使用 components / $ref / 数据模型，请求和响应按真实返回字段写成示例。\n\n约定：\n- 业务接口默认 HTTP 200，成功看 `code=0`，失败看 body 的 `code` / `message` / `fields`\n- 只有明确调用 `webx.FailWithStatus` 的接口才会返回非 200（限流 429、超限 413、真实 HTTP 404）\n- 端口以配置 `server.port` 为准（本仓库 yml 是 `10006`，yml.example 是 `10005`）\n- 需要 `X-Demo-Token`（任意非空值，例如 `x`）的路径：`/test/**`、`POST /api/orders`\n- `POST /api/orders` 还必须带 `Idempotency-Key`；`X-Demo-Token` 同时是幂等 scope（同用户同键重放，换用户不冲突）\n- `/api/products` 组挂限流中间件：每个路由 FullPath × ClientIP 各 10 次/分钟（不是整组一个桶），超限 HTTP 429 + `Retry-After`\n- `/livez` 接 liveness；`/readyz`（及 `/health`）接 readiness。`log_db` 非关键，单独挂了不让整体变 503\n- panic 恢复返回 HTTP 500、空 body，不是 webx 格式\n",
+    "description": "cmd/example 的 HTTP 接口文档。导入本文件即可（导入 → OpenAPI/Swagger）。\n\n不使用 components / $ref / 数据模型，请求和响应按真实返回字段写成示例。\n\n约定：\n- 业务接口默认 HTTP 200，成功看 `code=0`，失败看 body 的 `code` / `message` / `fields`\n- 只有明确调用 `webx.FailWithStatus` 的接口才会返回非 200（限流 429、超限 413、真实 HTTP 404）\n- 端口以配置 `server.port` 为准（本仓库 yml 是 `10006`，yml.example 是 `10005`）\n- 需要 `X-Demo-Token`（任意非空值，例如 `x`）的路径：`/test/**`、`POST /api/orders`\n- `POST /api/orders` 还必须带 `Idempotency-Key`；`X-Demo-Token` 同时是幂等 scope（同用户同键重放，换用户不冲突）\n- `/api/products` 组挂限流中间件：每条路径 × ClientIP 平均每分钟 10 次、最多连续 5 次（不是整组一份额度），超限 HTTP 429，`Retry-After` 是还要等的秒数\n- `/livez` 接 liveness；`/readyz`（及 `/health`）接 readiness。`log_db` 非关键，单独挂了不让整体变 503\n- panic 恢复返回 HTTP 500、空 body，不是 webx 格式\n",
     "title": "go-frame-server example",
     "version": "1.0.0"
   },
@@ -170,7 +170,7 @@
     },
     "/api/products/list": {
       "get": {
-        "description": "分页列表。`page` 默认 1，`page_size` 默认 20，最大 500。`keyword` 最长 50。\n限流：本路径 × ClientIP 每分钟 10 次，超限 HTTP 429。组内其它路径各自计数。\n",
+        "description": "分页列表。`page` 默认 1，`page_size` 默认 20，最大 500。`keyword` 最长 50。\n限流：本路径 × ClientIP 平均每分钟 10 次、最多连续 5 次，超限 HTTP 429。组内其它路径各自计数。\n",
         "parameters": [
           {
             "example": 1,
@@ -271,19 +271,29 @@
             "description": "触发限流",
             "headers": {
               "Retry-After": {
-                "example": "60",
+                "description": "至少还要等几秒",
+                "example": "6",
                 "schema": {
                   "type": "string"
                 }
               },
               "X-RateLimit-Limit": {
-                "example": "10",
+                "description": "最多连续放行几次",
+                "example": "5",
                 "schema": {
                   "type": "string"
                 }
               },
               "X-RateLimit-Remaining": {
+                "description": "还能立刻放行几次",
                 "example": "0",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-RateLimit-Reset": {
+                "description": "额度完全恢复还要几秒",
+                "example": "30",
                 "schema": {
                   "type": "string"
                 }
@@ -341,7 +351,8 @@
             "description": "触发限流",
             "headers": {
               "Retry-After": {
-                "example": "60",
+                "description": "至少还要等几秒",
+                "example": "6",
                 "schema": {
                   "type": "string"
                 }
@@ -353,12 +364,12 @@
         "tags": [
           "产品"
         ],
-        "description": "限流：本路径 × ClientIP 每分钟 10 次，超限 HTTP 429。组内其它路径各自计数。"
+        "description": "限流：本路径 × ClientIP 平均每分钟 10 次、最多连续 5 次，超限 HTTP 429。组内其它路径各自计数。"
       }
     },
     "/api/products/summary": {
       "get": {
-        "description": "读 refreshcache 内存值，不查库。缓存未就绪且 Loader 也失败时 code=50000，文案「产品数量统计暂不可用，请稍后重试」。\n限流：本路径 × ClientIP 每分钟 10 次，超限 HTTP 429。",
+        "description": "读 refreshcache 内存值，不查库。缓存未就绪且 Loader 也失败时 code=50000，文案「产品数量统计暂不可用，请稍后重试」。\n限流：本路径 × ClientIP 平均每分钟 10 次、最多连续 5 次，超限 HTTP 429。",
         "responses": {
           "200": {
             "content": {
@@ -400,7 +411,7 @@
     },
     "/api/products/{id}": {
       "get": {
-        "description": "详情来自 default_db，公告 notice 来自 config_db 的 `product.notice` 缓存（`ConfigKeyProductNotice`）。\n限流：本路径 × ClientIP 每分钟 10 次，超限 HTTP 429。",
+        "description": "详情来自 default_db，公告 notice 来自 config_db 的 `product.notice` 缓存（`ConfigKeyProductNotice`）。\n限流：本路径 × ClientIP 平均每分钟 10 次、最多连续 5 次，超限 HTTP 429。",
         "parameters": [
           {
             "example": 1,
@@ -545,7 +556,7 @@
         "tags": [
           "产品"
         ],
-        "description": "`status` 只能是 0（下架）或 1（上架），其它值 code=40000。\n限流：本路径 × ClientIP 每分钟 10 次，超限 HTTP 429。"
+        "description": "`status` 只能是 0（下架）或 1（上架），其它值 code=40000。\n限流：本路径 × ClientIP 平均每分钟 10 次、最多连续 5 次，超限 HTTP 429。"
       }
     },
     "/api/system-configs/{key}": {

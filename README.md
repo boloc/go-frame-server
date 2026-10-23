@@ -145,7 +145,7 @@ rdb    := frame.GetRedisCmdable()           // 通用 Redis 接口，自动适�
 | 统一响应/绑定/校验 | `pkg/frame/webx` | `Success` / `Fail` / `FailWithStatus` + `Bind*`；`SetOnFail`、`IncludeCallerInResponse`、`BizCode` | `/test/success`、`/test/not-found`、`/test/not-found-with-status`；钩子与 Caller 开关：`cmd/example/main.go` |
 | 统一错误类型 | `pkg/errs` | `*errs.Error`；`RegisterHTTPStatus` / `RegisterMessage` | `/test/business-error` + `internal/example/bizerr` |
 | 幂等 | `pkg/frame/idempotency` | Redis `SETNX`；`Required` / `FailOpen` / `WithScopeFunc` | `POST /api/orders`（`cmd/example/route/order_route.go`） |
-| 限流 | `pkg/frame/ratelimit` | Redis + Lua 固定窗口；必须显式 `WithLimit`/`WithWindow`。中间件可挂在组上，计数按路由 `FullPath` × ClientIP，不是整组共用一个桶 | `/api/products` 组（`cmd/example/route/product_route.go`） |
+| 限流 | `pkg/frame/ratelimit` | `Smooth` 平滑限流（GCRA）、`Fixed` 固定窗口、`Sliding` 滑动窗口、`WithBan` 持续超限才封禁、封禁时长逐级加长；中间件挂在哪一层这一层共用额度，规则名不同的两层各算各的；logic 里可用 `Allow` / `Status` / `Reset` 按账号、手机号限流 | `/api/products` 组（`cmd/example/route/product_route.go`） |
 | 定时任务 | `pkg/frame/cron` | 防并发重入、执行指标、优雅关闭；`Exclusive` 走 Redis 锁 | `cmd/example/cron/cron.go`；`GET /api/cron/tasks` |
 | 双层刷新只读缓存 | `pkg/frame/refreshcache` | 数据源 → Redis → 内存；`Get` 内存未就绪才回落 Loader；`Jitter` 错开刷新 | `GET /api/products/summary`、详情页公告 `GET /api/products/:id` |
 | Redis key 命名空间 | `pkg/frame/rediskey` | 命名空间由应用注入（取 `server.name`），框架不给默认值；四类能力自动拼，业务 key 用 `App` 显式拼 | `cmd/example/bootstrap/redis.go`；`GET /test/redis-key` |
@@ -172,7 +172,7 @@ rdb    := frame.GetRedisCmdable()           // 通用 Redis 接口，自动适�
 | `RequestTimeout` | 给请求 `ctx` 挂整体超时，不写响应 | 由 `NewGinComponent` 按 `server.request_timeout` 挂载；演示 `GET /test/slow` |
 | `monitor.HTTPMetrics` | `http_requests_total` / duration / in-flight，读 `webx.BizCode` | `cmd/example/bootstrap/gin.go` |
 | `idempotency.Middleware` | 按路由/分组挂载，不要做成全局中间件 | `POST /api/orders` |
-| `ratelimit.Middleware` | 按路由/分组挂载；默认 key = `FullPath` + ClientIP | `/api/products` 组；每条路径各自 10 次/分钟 |
+| `ratelimit.Middleware` | 挂在 engine / 分组 / 单条路由上；默认按 ClientIP，`ByRoute` 按路由 + ClientIP；`SkipPaths` 放过探针 | `/api/products` 组；每条路径平均每分钟 10 次，最多连续 5 次 |
 
 ## 分层与编码约定
 

@@ -120,7 +120,7 @@ kill -HUP "$(pgrep -n -f './bin/example')"
 
 `/test/*` 多数要带演示头 `X-Demo-Token`。`POST /api/orders` 必须带 `Idempotency-Key`，`quantity` 范围是 1–99。
 
-`/api/products` 组挂了限流中间件：每个路由 `FullPath` × ClientIP 各 10 次/分钟，不是整组共用一个桶。超限 HTTP 429。完整字段和错误码见 OpenAPI。
+`/api/products` 组挂了限流中间件：每条路径 × ClientIP 平均每分钟 10 次，最多连续 5 次，之后每 6 秒恢复 1 次。超限 HTTP 429，`Retry-After` 是还要等的秒数。完整字段和错误码见 OpenAPI。
 
 ```bash
 # 能力演示

@@ -4,17 +4,19 @@
 // 完整 key 按冒号分段，从外到内依次是 命名空间 -> 能力 -> 实例标识：
 //
 //	幂等      Namespace() + SegIdempotency + 路由 FullPath + [":" + scope] + ":" + 客户端幂等键
-//	限流      Namespace() + SegRateLimit   + 路由 FullPath + ":" + ClientIP
+//	限流      Namespace() + SegRateLimit   + "{" + 规则名 + ":" + 限流对象 + "}" + ":gcra" | ":count" | ":window" | ":ban" | ":strikes" | ":level"
 //	任务锁    Namespace() + SegCronLock    + 调度器名（cron.NewComponent 的 name）+ ":" + Task.Name
 //	刷新缓存  Namespace() + SegCache       + refreshcache.Options.Key
+//
+// 限流的花括号是 Redis Cluster 的 hash tag：同一规则、同一对象的几个 key 落在同一个槽。
 //
 // 命名空间由应用在装配阶段用 SetNamespace 注入一次（示例取 server.name，见
 // cmd/example/bootstrap/redis.go）。框架故意不提供默认值：admin / api 这类多个应用共用
 // 同一个 Redis db 时，一个写死的默认值会让它们的键空间悄悄重叠，而这种问题只在线上暴露。
 //
-// 这些 key 都是懒拼的——幂等/限流在中间件构造时取前缀（路由注册发生在 GinComponent.Start
-// 里），任务锁和缓存 key 在真正读写 Redis 时才拼——所以即便持有它们的是包级变量（构造早于
-// 配置加载），在 bootstrap 里设置一次也能全局生效。
+// 这些 key 都是懒拼的——幂等在中间件构造时取前缀（路由注册发生在 GinComponent.Start 里），
+// 限流在每次判断时拼，任务锁和缓存 key 在真正读写 Redis 时才拼——所以即便持有它们的是包级
+// 变量（构造早于配置加载），在 bootstrap 里设置一次也能全局生效。
 package rediskey
 
 import (

@@ -9,11 +9,15 @@ import (
 )
 
 // registerProductRoutes 演示 route -> handler -> logic -> repository 分层，并挂限流中间件。
+// 每条路径 × ClientIP 平均每分钟 10 次，最多连续 5 次；之后每 6 秒恢复 1 次。
 //
-//	for i in $(seq 1 15); do curl -s -o /dev/null -w "%{http_code}\n" localhost:10006/api/products/list; done
+//	for i in $(seq 1 8); do curl -s -o /dev/null -w "%{http_code}\n" localhost:10006/api/products/list; done
 func registerProductRoutes(r *gin.Engine) {
 	products := r.Group("/api/products")
-	products.Use(ratelimit.Middleware(ratelimit.WithLimit(10), ratelimit.WithWindow(time.Minute)))
+	products.Use(ratelimit.Middleware(
+		ratelimit.Smooth("products", 10, time.Minute, 5),
+		ratelimit.WithKeyFunc(ratelimit.ByRoute),
+	))
 	{
 		products.GET("list", handler.ProductList) // 列表（分页）
 

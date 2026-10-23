@@ -189,14 +189,76 @@ type ProductItem struct { ... }
 示例用 `X-Demo-Token` 当演示用户：同一 token + 同一 `Idempotency-Key` 重放；换 token
 同 key 互不干扰。见 `cmd/example/route/order_route.go` 顶部的两条 curl。
 
-## 6. 限流：Redis 不可用时的降级策略同样必须显式选择
+## 6. 限流：先选算法、维度和挂载层，再选降级策略
 
-**规则：**
+**选算法：**
 
-- 需要防刷/防滥用的接口，按路由/分组挂载 `pkg/frame/ratelimit.Middleware(...)`（不要做成
-  全局中间件——不是所有接口都需要限流，额外的 Redis 往返成本不该让不需要的接口也付）。
-- `WithLimit`/`WithWindow` 必须显式设置，没有通用的默认阈值，不设置会在路由注册阶段直接
-  panic（这是启动期就该发现的编程错误）。
+- `ratelimit.Smooth(name, limit, period, burst)`：平滑限流（GCRA，等价于令牌桶）。长期平均每
+  `period` 最多 `limit` 次，瞬时最多连续 `burst` 次，额度按时间连续恢复。任意时长 t 内最多
+  `burst + limit×t/period` 次。只存一个时间戳，用于全站兜底、登录后按用户限速。
+- `ratelimit.Sliding(name, limit, period)`：滑动窗口。任意连续 `period` 内最多 `limit` 次，
+  没有突发余量。每次放行存一条时间戳，内存随 `limit` 增长，只用于次数少的敏感操作：注册、
+  登录失败、发验证码、答密保。
+- `.WithBan(ratelimit.Ban{...})`：持续超限才封禁，封禁期间全部拒绝、不再计数。用于扫路径、
+  撞库、刷短信。不封禁时只拒绝超出的部分，额度一恢复脚本就能接着打，相当于一直拿满上限；
+  封禁后这段时间它拿到的是 0。`Ban` 的四项都要自己选：
+  - `Strikes` + `Within`：从第一次被拒开始，`Within` 内被拒到 `Strikes` 次才封，到期清零重新数。
+    Redis 里只存一个计数。正常用户被 429 后会停，到不了；
+    脚本一直打，很快够数。`Strikes: 1` 是第一次被拒就封。
+  - `Durations`：第 1、2、3…次封禁各封多久，超过列表长度后一直用最后一档。
+  - `Forget`：最近一次封禁之后多久没再被封，就从第 1 档重新算。不能短于最长的一档。
+- `ratelimit.Fixed(name, limit, period)`：固定窗口。从第一次请求起算一轮，`period` 内一个计数
+  累加，超过 `limit` 就拒绝，这一轮结束 key 自动删除、从 0 重算。Redis 里只存一个数字，最省、
+  在 Redis 客户端里一眼看得懂。代价是交界处有空子：上一轮末尾打满、新一轮开头又能马上打满，
+  短时间内最多 `2×limit`；配 `WithBan` 后钻这个空子的脚本很快会被封。挡"几分钟内打了几十次"
+  这类场景用它就够。
+- 阈值没有默认值，参数不合法在构造规则时直接 panic。
+
+**选维度和挂载层：**
+
+- 中间件挂在哪一层，这一层共用一份额度：`r.Use` 是全站，`group.Use` 是这一组，
+  `GET(path, mw, handler)` 只管这一条。
+- 默认按客户端 IP（`ratelimit.ByIP`）。同一层里每条路由各算各的用 `ratelimit.ByRoute`。
+  登录后按用户限速传自己的 `KeyFunc`。`KeyFunc` 返回空字符串时这次请求不限流。
+- 规则名决定计数：同名规则、同一个对象共用额度，不同名互不影响。全站一层、分组一层各起
+  名字，就是两份独立额度，请求要两层都过；不会出现两层打在同一个计数上、一次请求扣两次。
+- 全站挂时用 `WithSkip(ratelimit.SkipPaths("/health", "/metrics"))` 放过探针。探针被 429
+  会让编排系统把实例当成不健康摘掉。
+- 按 IP 限流时，同一个出口 IP 后面的人共用额度（公司网络、运营商 NAT）。登录后的接口按
+  用户 ID 限，不要只靠 IP。
+- 账号、手机号这类要先解析请求体才拿得到的维度，或者只给失败计数的场景，在 logic 里调
+  `ratelimit.Allow` / `Status` / `Reset`，不写中间件：
+
+```go
+var loginFail = ratelimit.Sliding("login-fail", 5, 15*time.Minute).WithBan(ratelimit.Ban{
+	Strikes:   1, // 15 分钟内错满 5 次之后再错一次就锁
+	Durations: []time.Duration{15 * time.Minute, time.Hour, 24 * time.Hour},
+	Forget:    24 * time.Hour,
+})
+
+// 只看是否在封禁中，不扣次数。这里不能看 Allowed：错满 5 次后 Allowed 已经是 false，
+// 第 6 次会在核对密码前被挡住，走不到下面会触发封禁的 Allow。
+if res, err := ratelimit.Status(ctx, loginFail, account); err == nil && res.Banned {
+	return errs.New(errs.CodeTooManyRequests, "")
+}
+if !passwordMatched {
+	_, _ = ratelimit.Allow(ctx, loginFail, account) // 只给失败计数，第 6 次被拒并触发封禁
+	return errs.Unauthorized("账号或密码错误")
+}
+_ = ratelimit.Reset(ctx, loginFail, account) // 登录成功清零
+```
+
+| 场景 | 规则 | 维度 | 挂法 |
+| --- | --- | --- | --- |
+| 全站兜底 | `Smooth` | IP，跳过探针 | `r.Use` |
+| 注册、登录、找回密码入口 | `Sliding` | IP | 分组或单条路由 |
+| 登录失败 | `Sliding` + `WithBan` | 账号 | logic 里 `Status` / `Allow` / `Reset` |
+| 发短信、邮件验证码 | `Sliding` + `WithBan` | 手机号、邮箱和 IP 各一条 | logic 里 `Allow` |
+| 登录后的接口 | `Smooth` | 用户 ID | 登录分组 |
+| 未匹配路由（扫路径） | `Sliding` + `WithBan` | IP | `r.NoRoute` |
+
+**选降级策略：**
+
 - Redis 故障时的降级策略同样必须显式选择（`WithFailOpen`），语义和默认值跟
   `pkg/frame/idempotency` 完全一致：`true`（默认）降级放行，`false` 直接拒绝。限流用来
   保护一个脆弱的下游依赖时（下游扛不住超过阈值的流量），应该显式 `WithFailOpen(false)`，
@@ -206,8 +268,12 @@ type ProductItem struct { ... }
   本框架"`webx.Fail` 默认永远 200"的一般约定——限流是专门设计给网关/负载均衡器/客户端
   退避逻辑识别的信号，这些组件普遍认 HTTP 状态码，不会去解析业务响应体里的 `code`。
   如果前端确实只处理 200 + body.code，用 `WithUseRealStatus(false)` 切回 `webx.Fail`。
+- 响应头：`X-RateLimit-Limit` 是规则容量（`Smooth` 是 `burst`，`Sliding` 是 `limit`），
+  `X-RateLimit-Remaining` 是还能立刻放行几次，`X-RateLimit-Reset` 是额度完全恢复还要几秒；
+  被拒时 `Retry-After` 是至少还要等几秒，封禁中是封禁剩余时间。
+- 要在被拒时告警或记录（例如推飞书），用 `WithOnLimited`。
 
-参考实现：`cmd/example/route/product_route.go` 的 `/api/products` 组。中间件挂在组上，默认 Redis key 是 `rediskey.Prefix(rediskey.SegRateLimit)` + 路由 `FullPath` + `:` + ClientIP（见 `pkg/frame/ratelimit` 的 `defaultOptions` + `defaultKeyFunc`），所以 `/list`、`/summary`、`/:id` 各自 10 次/分钟，不是整组共用一个桶。
+参考实现：`cmd/example/route/product_route.go` 的 `/api/products` 组。`Smooth("products", 10, time.Minute, 5)` 配 `ByRoute`，所以 `/list`、`/summary`、`/:id` 各自平均每分钟 10 次、最多连续 5 次，不是整组共用一份额度。
 
 ## 7. 定时任务：任务只负责"业务逻辑"，调度相关的关注点都交给 `pkg/frame/cron`
 
@@ -340,9 +406,12 @@ body**（这种情况很少见，读 body 的需求几乎都应该走 `reqctx.Fr
 `cmd/example/route/order_route.go`、`product_route.go`）。Gin 的执行顺序是
 "全局中间件全部先跑完，再跑命中的分组中间件"，所以**分组中间件天然排在
 `ContextMiddleware` 之后**，不需要业务操心顺序——这也是为什么
-`pkg/frame/ratelimit` 的 `defaultKeyFunc` 敢直接读 `reqctx.FromGin(c).ClientIP`：
+`ratelimit.ByIP` 敢直接读 `reqctx.FromGin(c).ClientIP`：
 等分组中间件跑到的时候，`ContextMiddleware` 已经把这个字段填好了（即便没填好，
-`defaultKeyFunc` 也有 `c.ClientIP()` 兜底，见 `pkg/frame/ratelimit/ratelimit.go`）。
+`ByIP` 也有 `c.ClientIP()` 兜底，见 `pkg/frame/ratelimit/ratelimit.go`）。
+
+全站兜底的限流例外，用 `r.Use(...)` 挂在路由层的 engine 上：它同样排在 `GinComponent`
+全局链之后，所有业务路由都会经过它，探针用 `ratelimit.SkipPaths` 放过。
 
 同一个分组内挂多个中间件时，**先 `.Use()` 的先执行**。`/api/orders` 的顺序是
 `RequireDemoToken` 再 `idempotency.Middleware`（先确认请求"是谁"，再判断这个人的操作
@@ -362,7 +431,7 @@ body**（这种情况很少见，读 body 的需求几乎都应该走 `reqctx.Fr
 | 6 | `middleware.AccessLog` / `monitor.HTTPMetrics` | `bootstrap.SetupGin` 显式 `Use` | 必须在 `ContextMiddleware` 之后（读 request_id / ClientIP / BizCode） |
 | 7 | 业务鉴权/审计类全局中间件 | `bootstrap.SetupGin` 显式 `Use` | 建议在 `ContextMiddleware` 之后（如果要用 `reqctx`） |
 | 8 | 分组鉴权中间件（示例：`RequireDemoToken`） | `group.Use(...)` | 建议排在幂等/限流之前 |
-| 9 | `idempotency.Middleware` / `ratelimit.Middleware` | `group.Use(...)` | 依赖 `reqctx.ClientIP`（有兜底），不强制要求 `ContextMiddleware` 已跑 |
+| 9 | `idempotency.Middleware` / `ratelimit.Middleware` | `group.Use(...)`；全站兜底的限流用路由层 `r.Use(...)` | 依赖 `reqctx.ClientIP`（有兜底），不强制要求 `ContextMiddleware` 已跑 |
 
 ## 9. 统一失败通知：`pkg/alert`
 
@@ -512,18 +581,18 @@ body**（这种情况很少见，读 body 的需求几乎都应该走 `reqctx.Fr
   还写着早已改掉的调度器名）。
 - **命名空间必须由应用在装配阶段用 `rediskey.SetNamespace` 注入一次，框架故意不提供默认
   值。** admin / api 这类多个应用共用同一个 Redis db 时，一个写死的默认值会让它们的键空间
-  悄悄重叠：同名路由的限流会共用一个桶、同名缓存会互相覆盖，而这类问题只在线上暴露。没注入
+  悄悄重叠：同名规则的限流会共用一份额度、同名缓存会互相覆盖，而这类问题只在线上暴露。没注入
   就让它启动不了，比给个"看起来能跑"的默认值安全。
 - 命名空间取 `server.name`（参考实现：`cmd/example/bootstrap/redis.go`），所以
   `server.name` 是必填项，多个应用之间不能重名。换句话说，隔离粒度是"应用"而不是"二进制"：
   两个进程如果**故意**要共用缓存或限流桶，就该配同一个 `server.name`。
-- `SetNamespace` 只能调用一次，重复调用或传空值直接 panic。要给单个挂载点换前缀用各自的
-  `WithKeyPrefix`，不要试图改全局命名空间。
+- `SetNamespace` 只能调用一次，重复调用或传空值直接 panic。幂等要给单个挂载点换前缀用
+  `WithKeyPrefix`，限流换一个规则名，不要试图改全局命名空间。
 
 **为什么能在包级变量之后才注入：**
 
-四类 key 全是懒拼的——幂等和限流在 `Middleware()` 里取前缀，而路由注册发生在
-`GinComponent.Start` 内部；任务锁和缓存 key 在真正读写 Redis 时才拼。这三个时机都晚于配置
+四类 key 全是懒拼的——幂等在 `Middleware()` 里取前缀，而路由注册发生在
+`GinComponent.Start` 内部；限流在每次判断时拼；任务锁和缓存 key 在真正读写 Redis 时才拼。这些时机都晚于配置
 加载，所以即便 `cmd/example/cron.Component` 和 `internal/example/cache` 里的实例是包级变量
 （构造早于配置），在 `bootstrap.Setup` 里注入一次就能全局生效，不需要把它们改成在 bootstrap
 里构造。
@@ -532,7 +601,7 @@ body**（这种情况很少见，读 body 的需求几乎都应该走 `reqctx.Fr
 
 不会退化成静默共用 key，各能力都在启动期挡住——`refreshcache.Cache.Start` 和
 `cron.Component.Start`（有 Exclusive 任务时）返回启动错误，`idempotency.Middleware` /
-`ratelimit.Middleware` 在路由注册时 panic，和它们对 `WithLimit` 缺失的处理一致。
+`ratelimit.Middleware` 在路由注册时 panic，和限流规则参数不合法时的处理一致。
 
 **业务自己读写的 key 不在上面四类里，框架不碰它。** `frame.GetRedisCmdable().Set(ctx, "foo", ...)`
 落到 Redis 上就是 `foo`，一个字符都不会加。所以业务 key 默认是全共享的：同一个 Redis db 下
