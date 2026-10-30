@@ -9,11 +9,11 @@ import (
 	"github.com/boloc/go-frame-server/v2/pkg/frame/webx"
 	"github.com/boloc/go-frame-server/v2/pkg/logger"
 	"github.com/gin-gonic/gin"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 )
 
-// AccessLog 在每个请求结束后打一条结构化访问日志（msg 固定 "http: access"）。
+// AccessLog 在每个请求结束后打一条结构化访问日志（msg 固定 "http: access"），一个请求只有这一条。
+// 请求开始时在 ctx 上开日志作用域：webx 的错误、GORM 的失败 SQL、业务用 logger.AddToScope 挂的字段
+// 都在这一条里带出。级别规则见 accessLogLevel。
 // 与 monitor.HTTPMetrics 都应 Use 在 ContextMiddleware 之后（要拿 request_id/client_ip）、业务路由之前。
 func AccessLog(opts ...AccessLogOption) gin.HandlerFunc {
 	cfg := applyAccessLogOptions(opts...)
@@ -34,9 +34,13 @@ func AccessLog(opts ...AccessLogOption) gin.HandlerFunc {
 			return
 		}
 
+		ctx := logger.NewScope(c.Request.Context())
+		c.Request = c.Request.WithContext(ctx)
+
 		start := time.Now()
 		c.Next()
 		latency := time.Since(start)
+		scopeFields := logger.EndScope(ctx)
 
 		bizCode := errs.Code(-1)
 		hasBiz := false
@@ -52,33 +56,30 @@ func AccessLog(opts ...AccessLogOption) gin.HandlerFunc {
 			clientIP = c.ClientIP()
 		}
 
-		fields := []zap.Field{
-			zap.String("method", c.Request.Method),
-			zap.String("path", c.Request.URL.Path),
-			zap.String("route", c.FullPath()),
-			zap.Int("status", c.Writer.Status()),
-			zap.Int("biz_code", int(bizCode)),
-			zap.Duration("latency", latency),
-			zap.String("client_ip", clientIP),
-			zap.String("request_id", rc.RequestID),
-			zap.String("user_agent", c.Request.UserAgent()),
-			zap.Int("bytes_out", c.Writer.Size()),
-		}
-		if errStr := c.Errors.String(); errStr != "" {
-			fields = append(fields, zap.String("errors", errStr))
+		// 顺序按控制台从左往右读：先结果，再错误详情（作用域字段），最后是排查用的上下文。
+		fields := []logger.Field{
+			logger.Int("status", c.Writer.Status()),
+			logger.Int("biz_code", int(bizCode)),
+			logger.Duration("latency", latency),
+			logger.String("method", c.Request.Method),
+			logger.String("route", c.FullPath()),
 		}
 		if slow {
-			fields = append(fields, zap.Bool("slow", true))
+			fields = append(fields, logger.Bool("slow", true))
 		}
+		if errStr := c.Errors.String(); errStr != "" {
+			fields = append(fields, logger.String("errors", errStr))
+		}
+		fields = append(fields, scopeFields...)
+		fields = append(fields,
+			logger.String("client_ip", clientIP),
+			logger.String("request_id", rc.RequestID),
+			logger.String("user_agent", c.Request.UserAgent()),
+			logger.Int("bytes_out", c.Writer.Size()),
+			logger.String("path", c.Request.URL.Path),
+		)
 
-		switch accessLogLevel(c.Writer.Status(), bizCode, hasBiz, slow) {
-		case zapcore.ErrorLevel:
-			logger.Error("http: access", fields...)
-		case zapcore.WarnLevel:
-			logger.Warn("http: access", fields...)
-		default:
-			logger.Info("http: access", fields...)
-		}
+		logger.Log(accessLogLevel(c.Writer.Status(), bizCode, hasBiz, slow), "http: access", fields...)
 	}
 }
 
@@ -116,13 +117,18 @@ func WithSlowThreshold(d time.Duration) AccessLogOption {
 	}
 }
 
-func accessLogLevel(status int, bizCode errs.Code, hasBiz, slow bool) zapcore.Level {
-	if status >= 500 || (hasBiz && bizCode >= errs.CodeInternal) {
-		return zapcore.ErrorLevel
+// 业务码 5xxxx 是 Error，其它业务失败是 Warn。没走 webx 的 HTTP 5xx（panic 恢复）只到 Warn：
+// panic 的 ERROR 和堆栈由恢复处记，这里靠 request_id 串起来。
+func accessLogLevel(status int, bizCode errs.Code, hasBiz, slow bool) logger.Level {
+	if hasBiz && bizCode >= errs.CodeInternal {
+		return logger.ErrorLevel
+	}
+	if hasBiz && bizCode != errs.CodeOK {
+		return logger.WarnLevel
 	}
 	// biz_code=-1 是「没走 webx」，不是业务失败。OPTIONS 204 就属于这种。
-	if status >= 400 || (hasBiz && bizCode != 0) || slow {
-		return zapcore.WarnLevel
+	if status >= 400 || slow {
+		return logger.WarnLevel
 	}
-	return zapcore.InfoLevel
+	return logger.InfoLevel
 }

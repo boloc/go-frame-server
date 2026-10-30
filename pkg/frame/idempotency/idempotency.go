@@ -15,7 +15,6 @@ import (
 	"github.com/boloc/go-frame-server/v2/pkg/logger"
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
-	"go.uber.org/zap"
 )
 
 const DefaultHeader = "Idempotency-Key"
@@ -170,9 +169,9 @@ func buildRedisKey(o *Options, c *gin.Context, key string) string {
 }
 
 func degrade(c *gin.Context, o *Options, reason, key string, err error) {
-	fields := []zap.Field{zap.String("reason", reason), zap.String("key", key), zap.String("route", c.FullPath())}
+	fields := []logger.Field{logger.String("reason", reason), logger.String("key", key), logger.String("route", c.FullPath())}
 	if err != nil {
-		fields = append(fields, zap.Error(err))
+		fields = append(fields, logger.Err(err))
 	}
 
 	alert.Notify(c.Request.Context(), alert.Event{
@@ -221,7 +220,7 @@ func finalize(ctx context.Context, client redisClient, redisKey string, ttl time
 
 	if !shouldCache(status, body) {
 		if err := client.Del(ctx, redisKey).Err(); err != nil {
-			logger.Warn("idempotency: release lock failed", zap.Error(err), zap.String("key", redisKey))
+			logger.Warn("idempotency: release lock failed", logger.Err(err), logger.String("key", redisKey))
 		}
 		return
 	}
@@ -232,13 +231,13 @@ func finalize(ctx context.Context, client redisClient, redisKey string, ttl time
 		Body:        string(body),
 	})
 	if err != nil {
-		logger.Warn("idempotency: marshal cached response failed", zap.Error(err))
+		logger.Warn("idempotency: marshal cached response failed", logger.Err(err))
 		_ = client.Del(ctx, redisKey).Err()
 		return
 	}
 
 	if err := client.Set(ctx, redisKey, string(payload), ttl).Err(); err != nil {
-		logger.Warn("idempotency: cache response failed", zap.Error(err), zap.String("key", redisKey))
+		logger.Warn("idempotency: cache response failed", logger.Err(err), logger.String("key", redisKey))
 	}
 }
 

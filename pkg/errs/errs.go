@@ -126,13 +126,16 @@ func defaultMessageFor(c Code) (string, bool) {
 //	Message 展示文案
 //	Err     底层原因，供日志和 errors.Is/As，默认不回给客户端
 //	Fields  参数校验失败时的字段详情
-//	Caller  首次构造时的业务代码位置
+//	Caller  最初出错的业务代码位置（file:line）。Wrap 一个已含 *Error 的错误时沿用内层的，
+//	        层层往外包也始终指向最早构造 *Error 的那一行
+//	Func    Caller 所在的函数，去掉 module 路径，形如 repository.(*ProductRepository).Find
 type Error struct {
 	Code    Code
 	Message string
 	Err     error
 	Fields  map[string]string
 	Caller  string
+	Func    string
 }
 
 func (e *Error) Error() string {
@@ -147,23 +150,35 @@ func (e *Error) Unwrap() error { return e.Err }
 
 const pkgImportPath = "github.com/boloc/go-frame-server/v2/pkg/errs"
 
-// captureCaller 返回调用栈上第一个不属于本包的帧。
-func captureCaller() string {
+// 返回调用栈上第一个不属于本包的帧：file:line 和短函数名。
+func captureCaller() (caller, fn string) {
 	var pcs [16]uintptr
 	n := runtime.Callers(1, pcs[:])
 	if n == 0 {
-		return ""
+		return "", ""
 	}
 	frames := runtime.CallersFrames(pcs[:n])
 	for {
 		frame, more := frames.Next()
 		if !strings.HasPrefix(frame.Function, pkgImportPath+".") {
-			return fmt.Sprintf("%s:%d", frame.File, frame.Line)
+			return fmt.Sprintf("%s:%d", frame.File, frame.Line), shortFuncName(frame.Function)
 		}
 		if !more {
-			return ""
+			return "", ""
 		}
 	}
+}
+
+// 去掉导入路径只留包名短名。泛型实例化的类型参数里也可能有 "/"，只在 "[" 之前找。
+func shortFuncName(name string) string {
+	head := name
+	if i := strings.IndexByte(head, '['); i >= 0 {
+		head = head[:i]
+	}
+	if i := strings.LastIndexByte(head, '/'); i >= 0 {
+		return name[i+1:]
+	}
+	return name
 }
 
 // New 创建一个业务错误。message 为空时使用该 Code 登记的默认文案。
@@ -171,7 +186,8 @@ func New(code Code, message string) *Error {
 	if message == "" {
 		message, _ = defaultMessageFor(code)
 	}
-	return &Error{Code: code, Message: message, Caller: captureCaller()}
+	caller, fn := captureCaller()
+	return &Error{Code: code, Message: message, Caller: caller, Func: fn}
 }
 
 // Newf 格式化创建，等价于 New(code, fmt.Sprintf(format, args...))。
@@ -180,6 +196,7 @@ func Newf(code Code, format string, args ...any) *Error {
 }
 
 // Wrap 把底层 error 包装为业务错误。err 为 nil 时返回 nil，调用方应先判断 err。
+// err 链上已有 *Error 时，Caller/Func 沿用最内层的，Code/Message 用这次传入的。
 func Wrap(code Code, err error, message string) *Error {
 	if err == nil {
 		return nil
@@ -191,7 +208,11 @@ func Wrap(code Code, err error, message string) *Error {
 			message = err.Error()
 		}
 	}
-	return &Error{Code: code, Message: message, Err: err, Caller: captureCaller()}
+	if inner := asError(err); inner != nil && inner.Caller != "" {
+		return &Error{Code: code, Message: message, Err: err, Caller: inner.Caller, Func: inner.Func}
+	}
+	caller, fn := captureCaller()
+	return &Error{Code: code, Message: message, Err: err, Caller: caller, Func: fn}
 }
 
 // WithFields 附加字段级详情，典型场景是参数校验失败时标出具体字段。
@@ -243,6 +264,30 @@ func From(err error) *Error {
 		return e
 	}
 	return Wrap(CodeInternal, err, "")
+}
+
+// FromCaller 与 From 相同，但兜底包装时 Caller/Func 记成调用方往上第 skip 层。
+// 给替业务转交错误的函数用：skip=1 指向调用该函数的那一行，而不是该函数自己。
+func FromCaller(err error, skip int) *Error {
+	if err == nil {
+		return nil
+	}
+	if e := asError(err); e != nil {
+		return e
+	}
+	return Wrap(CodeInternal, err, "").AtCaller(skip + 1)
+}
+
+// AtCaller 把 Caller/Func 改成调用 AtCaller 的函数往上第 skip 层，skip=0 就是调用 AtCaller 的那个函数。
+// 给替业务构造错误的框架函数用（如 webx.Bind），让位置指向业务里调用它的那一行。
+func (e *Error) AtCaller(skip int) *Error {
+	if pc, file, line, ok := runtime.Caller(skip + 1); ok {
+		e.Caller = fmt.Sprintf("%s:%d", file, line)
+		if f := runtime.FuncForPC(pc); f != nil {
+			e.Func = shortFuncName(f.Name())
+		}
+	}
+	return e
 }
 
 func asError(err error) *Error {

@@ -15,6 +15,8 @@
 package ratelimit
 
 import (
+	"context"
+	"errors"
 	"math"
 	"slices"
 	"strconv"
@@ -27,7 +29,6 @@ import (
 	"github.com/boloc/go-frame-server/v2/pkg/frame/webx"
 	"github.com/boloc/go-frame-server/v2/pkg/logger"
 	"github.com/gin-gonic/gin"
-	"go.uber.org/zap"
 )
 
 // KeyFunc 从请求里取限流对象。返回空字符串时这次请求不限流。
@@ -156,6 +157,11 @@ func Middleware(rule Rule, opts ...Option) gin.HandlerFunc {
 
 		res, err := o.Limiter.Allow(c.Request.Context(), rule, key)
 		if err != nil {
+			// 请求 context 已取消，Redis 没有故障。不发降级告警，额度也不扣。
+			if errors.Is(err, context.Canceled) {
+				c.Next()
+				return
+			}
 			degrade(c, o, rule, err)
 			return
 		}
@@ -176,7 +182,7 @@ func Middleware(rule Rule, opts ...Option) gin.HandlerFunc {
 }
 
 func degrade(c *gin.Context, o *Options, rule Rule, err error) {
-	fields := []zap.Field{zap.String("rule", rule.name), zap.String("route", c.FullPath()), zap.Error(err)}
+	fields := []logger.Field{logger.String("rule", rule.name), logger.String("route", c.FullPath()), logger.Err(err)}
 
 	alert.Notify(c.Request.Context(), alert.Event{
 		Scope: "ratelimit", Name: rule.name, Message: "degraded", Err: err,

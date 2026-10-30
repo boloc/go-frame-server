@@ -359,15 +359,16 @@ Exclusive 任务通常不幂等：Redis 不可用时宁可漏跑一轮（skipped
 `WithGinXxx` Option 调整开不开、阈值多少，不需要关心顺序：
 
 ```text
-1. gin.Logger()              仅 DebugMode 开启
-2. gin.CustomRecoveryWithWriter  兜底 panic，堆栈经 pkg/logger 落地（不用 gin.Recovery，避免只打到 stderr）
-3. middleware.MaxBodyBytes    默认 4MB，WithGinMaxBodyBytes(0) 可关闭
-4. middleware.RequestTimeout  默认关闭，WithGinRequestTimeout(d) 开启
-5. detectUnconfiguredProxy    仅 TrustedProxies 未配置时开启（提醒用，不拦截请求）
-6. WithGinMiddleware(...) 里传入的中间件
+1. gin.CustomRecoveryWithWriter  兜底 panic，堆栈经 pkg/logger 落地（不用 gin.Recovery，避免只打到 stderr）
+2. middleware.MaxBodyBytes    默认 4MB，WithGinMaxBodyBytes(0) 可关闭
+3. middleware.RequestTimeout  默认关闭，WithGinRequestTimeout(d) 开启
+4. detectUnconfiguredProxy    仅 TrustedProxies 未配置时开启（提醒用，不拦截请求）
+5. WithGinMiddleware(...) 里传入的中间件
 ```
 
-**第 3 步必须排在任何会读整包 body 的中间件之前**（比如 8.2 的 `ContextMiddleware`）：
+不挂 `gin.Logger()`：请求日志在所有环境都只由 `middleware.AccessLog` 打一条（带业务码）。
+
+**第 2 步必须排在任何会读整包 body 的中间件之前**（比如 8.2 的 `ContextMiddleware`）：
 `MaxBodyBytes` 用 `http.MaxBytesReader` 包一层 `c.Request.Body`，如果读 body 的中间件先跑，
 限制形同虚设——`NewGinComponent` 内部的注册顺序已经保证了这一点，业务只有在**脱离
 `GinComponent` 自己拼 `gin.Engine`** 时才需要自己操心这条规则。
@@ -423,7 +424,7 @@ body**（这种情况很少见，读 body 的需求几乎都应该走 `reqctx.Fr
 
 | 顺序 | 中间件 | 挂载方式 | 前置要求 |
 | --- | --- | --- | --- |
-| 1 | `gin.Logger()` / `gin.CustomRecoveryWithWriter` | `GinComponent` 内置 | 无 |
+| 1 | `gin.CustomRecoveryWithWriter` | `GinComponent` 内置 | 无 |
 | 2 | `middleware.MaxBodyBytes` | `GinComponent` 内置 | 必须在任何读 body 的中间件之前 |
 | 3 | `middleware.RequestTimeout` | `GinComponent` 内置 | 无强制要求，建议靠前 |
 | 4 | `detectUnconfiguredProxy` | `GinComponent` 内置 | 无 |
@@ -446,9 +447,16 @@ body**（这种情况很少见，读 body 的需求几乎都应该走 `reqctx.Fr
   （HTTP 服务器后台 Serve 循环意外退出）、`pkg/frame/cron`（任务失败/panic）、
   `pkg/frame/idempotency`/`pkg/frame/ratelimit`（Redis 降级发生时）、`pkg/frame/webx`
   （`>= errs.CodeInternal` 的请求失败）。
-- `webx.SetOnFail` 不受影响，继续按它原来的方式用（参数是 route + `*errs.Error`，比
-  `alert.Event` 更精确，适合做请求级别的错误率统计）；`alert` 是更泛化的"后台/异步也要
-  覆盖"的那一层，两者不冲突，可以同时用。
+- `webx.SetOnFail`（参数是 `*gin.Context` + `*errs.Error`，比 `alert.Event` 更精确）适合做
+  请求级别的计数、按错误码分流告警；`alert` 是更泛化的"后台/异步也要覆盖"的那一层，两者
+  不冲突，可以同时用。
+- 一次请求一条日志 `http: access`（5xxxx 为 ERROR），`webx.Fail` 把错误挂到请求的日志作用域，
+  由 `AccessLog` 带出 `error`/`origin_func`/`origin`/`failed_sql`；业务要额外输出的字段用
+  `logger.AddToScope(ctx, ...)` 挂上。`SetOnFail` 回调和 alert Hook 里**不要**再把同一个错误写回日志，
+  Hook 只负责发外部渠道。webx 发出的事件 `Fields` 已带 `request_id`/`origin_func`/`origin`，渠道消息直接用。
+- `origin` 是最早构造 `*errs.Error` 的位置，`errs.Wrap` 层层包装时沿用内层的。所以底层出错时
+  就地用 `errs.Database(err)` 之类包一次，上层只管 `errs.Wrap` 或 `fmt.Errorf("%w")` 往外抛。
+  非请求路径（cron、goroutine）记错误用 `logger.Err(err)`，同样会展开这几项。
 - `alert.Notify` 是 fire-and-forget（内部另起 goroutine + recover），业务的 Hook 函数
   即使自己 panic 或者调外部服务很慢，也不会拖慢/搞崩调用它的那个子系统（cron 任务、
   HTTP 请求……）；但也正因为是异步的，Hook 内部不要依赖"这次调用一定会在进程退出前

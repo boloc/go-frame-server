@@ -16,7 +16,6 @@ import (
 	"github.com/boloc/go-frame-server/v2/pkg/logger"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/redis/go-redis/v9"
-	"go.uber.org/zap"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -181,7 +180,7 @@ func (c *Cache[T]) warmUp(ctx context.Context) {
 	v, err := c.opts.Loader(ctx)
 	if err != nil {
 		logger.Warn("cache: warm up failed, Get will fall back to synchronous Loader calls until the first successful refresh",
-			zap.String("key", c.opts.Key), zap.Error(err))
+			logger.String("key", c.opts.Key), logger.Err(err))
 		return
 	}
 	c.value.Store(&v)
@@ -233,13 +232,13 @@ func (c *Cache[T]) writeToRedis(ctx context.Context, v T) error {
 	}
 	payload, err := json.Marshal(v)
 	if err != nil {
-		logger.Error("cache: marshal value failed", zap.String("key", c.opts.Key), zap.Error(err))
+		logger.Error("cache: marshal value failed", logger.String("key", c.opts.Key), logger.Err(err))
 		alert.Notify(ctx, alert.Event{Scope: "cache", Name: c.opts.Key, Message: "marshal failed", Err: err})
 		return err
 	}
 	if err := client.Set(ctx, c.RedisKey(), string(payload), c.opts.RedisTTL).Err(); err != nil {
 		logger.Warn("cache: write to redis failed",
-			zap.String("key", c.opts.Key), zap.String("redis_key", c.RedisKey()), zap.Error(err))
+			logger.String("key", c.opts.Key), logger.String("redis_key", c.RedisKey()), logger.Err(err))
 		return err
 	}
 	return nil

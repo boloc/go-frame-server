@@ -26,7 +26,7 @@ var fallbackLogger = newFallbackLogger()
 func newFallbackLogger() *zap.Logger {
 	cfg := zap.NewDevelopmentConfig()
 	cfg.OutputPaths = []string{"stderr"}
-	l, err := cfg.Build(zap.AddCallerSkip(1))
+	l, err := cfg.Build(zap.AddCallerSkip(1), zap.AddStacktrace(zapcore.DPanicLevel))
 	if err != nil {
 		return zap.NewNop()
 	}
@@ -48,12 +48,16 @@ type LoggerComponent struct {
 	zapLogger *zap.Logger
 }
 
+// Level 日志级别。调用方用本包的 DebugLevel / InfoLevel / WarnLevel / ErrorLevel，不要再 import zapcore。
+type Level = zapcore.Level
+
+const DefaultFilename = "./logs/app.log"
+
 const (
-	DefaultFilename               = "./logs/app.log"
-	DebugLevel      zapcore.Level = iota - 1
-	InfoLevel
-	WarnLevel
-	ErrorLevel
+	DebugLevel = zapcore.DebugLevel
+	InfoLevel  = zapcore.InfoLevel
+	WarnLevel  = zapcore.WarnLevel
+	ErrorLevel = zapcore.ErrorLevel
 )
 
 // LevelToString 将自定义级别转换为字符串
@@ -274,6 +278,8 @@ func (l *LoggerComponent) Start(ctx context.Context) error {
 			// 控制台输出的编码器配置 - 使用彩色输出，本地开发更易读
 			consoleEncoderConfig := encoderConfig
 			consoleEncoderConfig.EncodeLevel = zapcore.CapitalColorLevelEncoder
+			// 控制台给人看，耗时写成 2.96ms；文件和 JSON 控制台仍是秒数，便于统计。
+			consoleEncoderConfig.EncodeDuration = zapcore.StringDurationEncoder
 			consoleEncoder = zapcore.NewConsoleEncoder(consoleEncoderConfig)
 		}
 
@@ -294,7 +300,9 @@ func (l *LoggerComponent) Start(ctx context.Context) error {
 		core,
 		zap.AddCaller(),
 		zap.AddCallerSkip(1),
-		zap.AddStacktrace(zapcore.ErrorLevel), // 为错误级别以上添加堆栈跟踪
+		// 自动堆栈是打日志位置的栈（多半是一串 gin 中间件），不是出错位置，ERROR 不带；
+		// 出错位置看 errs.Error 的 func/caller，panic 恢复处自己记 debug.Stack()。
+		zap.AddStacktrace(zapcore.DPanicLevel),
 		zap.WithFatalHook(zapcore.WriteThenFatal), // 确保 Fatal 级别的日志在程序退出前被写入
 	)
 
@@ -332,9 +340,21 @@ func (l *LoggerComponent) GetLogger() *zap.Logger {
 	return current()
 }
 
+// Replace 把本包 Debug/Info/... 的输出换成 l，返回恢复原状的函数。给测试接 zaptest/observer 用；
+// 生产装配走 LoggerComponent。l 应带 zap.AddCallerSkip(1)，否则 caller 会指向本包。
+func Replace(l *zap.Logger) (restore func()) {
+	prev := activeLogger.Swap(l)
+	return func() { activeLogger.Store(prev) }
+}
+
 // 时间编码器
 func timeEncoder(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
 	enc.AppendString(t.Format(time.DateTime))
+}
+
+// Log 按运行时决定的级别打一条日志，例如访问日志按请求结果选级别。
+func Log(level Level, msg string, fields ...Field) {
+	current().Log(level, msg, fields...)
 }
 
 func Debug(msg string, fields ...Field) {

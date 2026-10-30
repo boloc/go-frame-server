@@ -143,7 +143,7 @@ rdb    := frame.GetRedisCmdable()           // 通用 Redis 接口，自动适�
 | 能力 | 包路径 | 说明 | 示例位置 |
 | --- | --- | --- | --- |
 | 统一响应/绑定/校验 | `pkg/frame/webx` | `Success` / `Fail` / `FailWithStatus` + `Bind*`；`SetOnFail`、`IncludeCallerInResponse`、`BizCode` | `/test/success`、`/test/not-found`、`/test/not-found-with-status`；钩子与 Caller 开关：`cmd/example/main.go` |
-| 统一错误类型 | `pkg/errs` | `*errs.Error`；`RegisterHTTPStatus` / `RegisterMessage` | `/test/business-error` + `internal/example/bizerr` |
+| 统一错误类型 | `pkg/errs` | `*errs.Error`（构造时记 `Caller` + `Func`）；`RegisterHTTPStatus` / `RegisterMessage` | `/test/business-error` + `internal/example/bizerr`；`/test/database-error` |
 | 幂等 | `pkg/frame/idempotency` | Redis `SETNX`；`Required` / `FailOpen` / `WithScopeFunc` | `POST /api/orders`（`cmd/example/route/order_route.go`） |
 | 限流 | `pkg/frame/ratelimit` | `Smooth` 平滑限流（GCRA）、`Fixed` 固定窗口、`Sliding` 滑动窗口、`WithBan` 持续超限才封禁、封禁时长逐级加长；中间件挂在哪一层这一层共用额度，规则名不同的两层各算各的；logic 里可用 `Allow` / `Status` / `Reset` 按账号、手机号限流 | `/api/products` 组（`cmd/example/route/product_route.go`） |
 | 定时任务 | `pkg/frame/cron` | 防并发重入、执行指标、优雅关闭；`Exclusive` 走 Redis 锁 | `cmd/example/cron/cron.go`；`GET /api/cron/tasks` |
@@ -167,7 +167,7 @@ rdb    := frame.GetRedisCmdable()           // 通用 Redis 接口，自动适�
 | 中间件 | 说明 | 示例位置 |
 | --- | --- | --- |
 | `ContextMiddleware` | 生成/回显 `X-Request-Id`，捕获请求体供 `reqctx` 使用 | `cmd/example/bootstrap/gin.go`；字段演示 `/test/reqctx` |
-| `AccessLog` | 结构化访问日志（含 `biz_code`、`request_id`、耗时）；默认跳过探针和 `/metrics` | `cmd/example/bootstrap/gin.go`（`WithSlowThreshold(1s)`） |
+| `AccessLog` | 结构化访问日志（含 `biz_code`、`request_id`、耗时）；请求流水最高 Warn，不打 Error（失败的 ERROR 由 webx / panic 恢复记录，靠 `request_id` 串联）；默认跳过探针和 `/metrics` | `cmd/example/bootstrap/gin.go`（`WithSlowThreshold(1s)`） |
 | `MaxBodyBytes` | 限制单次请求体大小（GinComponent 默认 4MB） | 由 `NewGinComponent` 内置挂载；演示 `POST /test/body-limit` |
 | `RequestTimeout` | 给请求 `ctx` 挂整体超时，不写响应 | 由 `NewGinComponent` 按 `server.request_timeout` 挂载；演示 `GET /test/slow` |
 | `monitor.HTTPMetrics` | `http_requests_total` / duration / in-flight，读 `webx.BizCode` | `cmd/example/bootstrap/gin.go` |
@@ -249,8 +249,27 @@ SIGHUP 热重启**默认关闭**。需要时在 `frame.New` 里加 `frame.WithRe
 后面填代理网段；直连对外显式写 `trusted_proxies: []`。
 - 容器环境靠采集器收 stdout：把 `logs.stdout_json` 设为 `true`，否则 ANSI 颜色码会混进
 日志系统；只采集文件时忽略。
-- SQL 日志（错误、慢查询 >200ms）经 `pkg/logger` 落地，`record not found` 不算错误不记
-ERROR；`server.env: production` 时只记 SQL 错误，慢查询要看的话把 GORM 日志级别调到 Warn。
+- 一次操作一条日志：入口开日志作用域（`logger.NewScope`），下层只往作用域挂字段
+（`logger.AddToScope`），入口结束时打的那一条统一带出。ctx 没有作用域时，挂字段的一方自己记日志。
+  - HTTP 请求：`AccessLog` 开作用域，结束时打 `http: access`。业务码 5xxxx 是 ERROR，其它失败是
+    WARN，成功是 INFO。失败时带 `error` / `origin_func` / `origin`（webx 挂上），请求内 SQL 失败时带
+    `failed_sql` / `failed_sql_error` / `failed_sql_elapsed`（GORM logger 挂上）。
+  - cron 任务：执行器每次运行开作用域，失败时打 `cron: task failed`，带同样的字段。
+  - 业务想多输出什么（订单号、用户 ID……）就 `logger.AddToScope(ctx, logger.String("order_id", id))`，
+    成功和失败的那一条里都会带上。
+  - 没经过 `AccessLog` 的路由（被 `WithSkipPaths` 跳过等）由 webx 自己打 `webx: request failed`。
+`webx.SetOnFail` / `alert.SetHook` 里不要再把同一错误写一遍日志。ERROR 不带自动堆栈
+（只有 DPanic 及以上带）；panic 由恢复处单独打一条带堆栈的 ERROR。
+- 出错位置看 `origin_func` / `origin`：最早构造 `*errs.Error` 的那一行。`errs.Wrap` 包一个已含
+`*errs.Error` 的错误（中间夹 `fmt.Errorf("%w")` 也行）时沿用内层位置，层层往外抛也不会丢；
+`error` 是整条原因链，如 `[50000] 注册失败: [50001] data processing failed: Error 1054 ...`。
+任何地方用 `logger.Err(err)` 记错误（cron、goroutine、业务日志）都会自动带出 `origin_func` / `origin`。
+- SQL 日志经 `pkg/logger` 落地：有日志作用域时 SQL 错误挂到作用域上（见上条），没有时（启动期、
+自己起的 goroutine）打 ERROR `gorm: sql error`；慢查询超过阈值（`MySQLConfig.SlowThreshold`，默认 500ms）单独打一条 Warn `gorm: slow sql`。
+日志里的 SQL 默认只记 `?` 占位符、不带参数值（密码哈希、手机号不进日志），本地要看具体值时把
+`MySQLConfig.LogSQLParams` 设为 true。
+`record not found`、ctx 取消/超时不算错误。`server.env: production` 时只记 SQL 错误，慢查询要看
+的话把 GORM 日志级别调到 Warn。
 - 从库连接失败不会阻断启动（读回落到主库），但会打 Warn 日志并触发 `alert.Notify`，收到这
 条告警要去处理，不然主库在替从库扛读流量。
 - `alert.Notify` 是异步的，同时在跑的 Hook 上限 **64**（`alert.MaxInFlight`），超出直接丢弃
@@ -267,7 +286,7 @@ ERROR；`server.env: production` 时只记 SQL 错误，慢查询要看的话把
 - Redis Cluster 保持 `route_randomly: false`：开启会读从节点，幂等/限流/Exclusive 锁
 可能读到滞后数据。
 - 访问日志（`middleware.AccessLog`）和 HTTP 指标（`monitor.HTTPMetrics`）在示例里默认
-挂在 `ContextMiddleware` 之后。生产环境用 AccessLog，不要依赖 DebugMode 下的 `gin.Logger()`。
+挂在 `ContextMiddleware` 之后。框架不挂 `gin.Logger()`，各环境的请求日志都只有 AccessLog 这一条。
 
 ## 深入了解
 

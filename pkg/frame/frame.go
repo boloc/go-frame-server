@@ -14,7 +14,6 @@ import (
 
 	"github.com/boloc/go-frame-server/v2/pkg/alert"
 	"github.com/boloc/go-frame-server/v2/pkg/logger"
-	"go.uber.org/zap"
 )
 
 // Component 跟随进程生命周期启动/停止的资源。
@@ -302,6 +301,6 @@ func (f *Frame) logInfo(msg string) {
 }
 
 func (f *Frame) logError(msg string, err error) {
-	logger.Error(msg, zap.Error(err))
+	logger.Error(msg, logger.Err(err))
 	alert.Notify(context.Background(), alert.Event{Scope: "frame", Message: msg, Err: err})
 }

@@ -18,7 +18,6 @@ import (
 	gocron "github.com/netresearch/go-cron"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/redis/go-redis/v9"
-	"go.uber.org/zap"
 )
 
 // DefaultLockTTL 是 Task.LockTTL 为 0 时的默认租约。没有自动续租。
@@ -242,13 +241,16 @@ func (c *Component) Start(_ context.Context) error {
 
 	c.engine = engine
 	c.engine.Start()
-	logger.Info("cron: scheduler started", zap.Int("tasks", len(c.tasks)))
+	logger.Info("cron: scheduler started", logger.Int("tasks", len(c.tasks)))
 	return nil
 }
 
 // wrap 包装任务函数，添加日志、告警、指标采集等功能。
 func (c *Component) wrap(t Task) func(ctx context.Context) {
 	return func(ctx context.Context) {
+		// 一次任务一个日志作用域：任务里 GORM 的失败 SQL、业务挂的字段都在 "cron: task failed" 里带出。
+		ctx = logger.NewScope(ctx)
+
 		// 抖动在计时和抢锁之前：锁不能在 sleep 期间空占；耗时指标只反映真正干活。
 		if err := sleepJitter(ctx, t.Jitter); err != nil {
 			c.observeRun(t.Name, "canceled")
@@ -282,22 +284,25 @@ func (c *Component) wrap(t Task) func(ctx context.Context) {
 
 		err := t.Run(ctx)
 		elapsed := time.Since(start)
+		scopeFields := logger.EndScope(ctx)
 
 		status := "success"
 		switch {
 		case err == nil:
 			// 非特殊调试情况下正常执行不打印日志，不然会打印很多日志
 			// logger.Info("cron: task finished",
-			// 	zap.String("task", t.Name), zap.Duration("elapsed", elapsed))
+			// 	logger.String("task", t.Name), logger.Duration("elapsed", elapsed))
 		case errors.Is(err, context.Canceled):
 			// 进程退出时 Stop 会取消任务 ctx，查库/刷缓存被掐断是正常收尾，不当失败、不告警。
 			status = "canceled"
 			logger.Info("cron: task canceled",
-				zap.String("task", t.Name), zap.Duration("elapsed", elapsed))
+				logger.String("task", t.Name), logger.Duration("elapsed", elapsed))
 		default:
 			status = "failure"
-			logger.Error("cron: task failed",
-				zap.String("task", t.Name), zap.Duration("elapsed", elapsed), zap.Error(err))
+			fields := append([]logger.Field{
+				logger.String("task", t.Name), logger.Duration("elapsed", elapsed), logger.Err(err),
+			}, scopeFields...)
+			logger.Error("cron: task failed", fields...)
 			alert.Notify(ctx, alert.Event{
 				Scope: "cron", Name: t.Name, Message: "task failed", Err: err,
 				Fields: map[string]any{"elapsed": elapsed.String()},
@@ -337,8 +342,8 @@ func (c *Component) acquireExclusive(ctx context.Context, t Task) (token string,
 	}
 	if !claimed {
 		logger.Info("cron: exclusive lock not acquired, task skipped",
-			zap.String("task", t.Name), zap.String("scheduler", c.name),
-			zap.String("lock_key", c.LockKey(t.Name)))
+			logger.String("task", t.Name), logger.String("scheduler", c.name),
+			logger.String("lock_key", c.LockKey(t.Name)))
 		return "", false
 	}
 	return token, true
@@ -351,7 +356,7 @@ func (c *Component) releaseExclusive(ctx context.Context, t Task, token string) 
 	client, ok := c.redis()
 	if !ok || client == nil {
 		logger.Warn("cron: exclusive lock release skipped, redis unavailable",
-			zap.String("task", t.Name))
+			logger.String("task", t.Name))
 		return
 	}
 
@@ -359,14 +364,14 @@ func (c *Component) releaseExclusive(ctx context.Context, t Task, token string) 
 	defer cancel()
 	if err := releaseLockScript.Run(releaseCtx, client, []string{c.LockKey(t.Name)}, token).Err(); err != nil {
 		logger.Warn("cron: exclusive lock release failed",
-			zap.String("task", t.Name), zap.Error(err))
+			logger.String("task", t.Name), logger.Err(err))
 	}
 }
 
 func (c *Component) lockUnavailable(ctx context.Context, t Task, reason string, err error) {
 	logger.Warn("cron: exclusive lock unavailable, task skipped",
-		zap.String("task", t.Name), zap.String("scheduler", c.name),
-		zap.String("reason", reason), zap.Error(err))
+		logger.String("task", t.Name), logger.String("scheduler", c.name),
+		logger.String("reason", reason), logger.Err(err))
 	alert.Notify(ctx, alert.Event{
 		Scope:   "cron",
 		Name:    t.Name,
@@ -434,21 +439,21 @@ func (logAdapter) Info(msg string, keysAndValues ...any) {
 }
 
 func (logAdapter) Error(err error, msg string, keysAndValues ...any) {
-	fields := append(toZapFields(keysAndValues), zap.Error(err))
+	fields := append(toZapFields(keysAndValues), logger.Err(err))
 	logger.Error("cron: "+msg, fields...)
 }
 
-func toZapFields(keysAndValues []any) []zap.Field {
-	fields := make([]zap.Field, 0, len(keysAndValues)/2+1)
+func toZapFields(keysAndValues []any) []logger.Field {
+	fields := make([]logger.Field, 0, len(keysAndValues)/2+1)
 	for i := 0; i+1 < len(keysAndValues); i += 2 {
 		key, ok := keysAndValues[i].(string)
 		if !ok {
 			key = fmt.Sprintf("%v", keysAndValues[i])
 		}
-		fields = append(fields, zap.Any(key, keysAndValues[i+1]))
+		fields = append(fields, logger.Any(key, keysAndValues[i+1]))
 	}
 	if len(keysAndValues)%2 == 1 {
-		fields = append(fields, zap.Any("extra", keysAndValues[len(keysAndValues)-1]))
+		fields = append(fields, logger.Any("extra", keysAndValues[len(keysAndValues)-1]))
 	}
 	return fields
 }

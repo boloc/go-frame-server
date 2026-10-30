@@ -2,12 +2,57 @@ package cron
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/boloc/go-frame-server/v2/pkg/errs"
+	"github.com/boloc/go-frame-server/v2/pkg/logger"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
+
+func syncUsers() error { return errs.Database(errors.New("Error 1054")) }
+
+func TestWrapFailureIsOneLineWithScopeFields(t *testing.T) {
+	core, logs := observer.New(zapcore.DebugLevel)
+	t.Cleanup(logger.Replace(zap.New(core)))
+
+	c := NewComponentWithOptions("test-scope", []Option{WithoutMetrics()}, Task{
+		Name:     "sync-users",
+		Schedule: "@every 1h",
+		Run: func(ctx context.Context) error {
+			logger.AddToScope(ctx, logger.String("failed_sql", "SELECT 1"), logger.Int("batch", 3))
+			return fmt.Errorf("sync batch: %w", syncUsers())
+		},
+	})
+	c.wrap(c.tasks[0])(context.Background())
+
+	if logs.Len() != 1 {
+		t.Fatalf("want exactly one log line, got %+v", logs.All())
+	}
+	entry := logs.All()[0]
+	fields := entry.ContextMap()
+	if entry.Message != "cron: task failed" || entry.Level != zapcore.ErrorLevel {
+		t.Fatalf("entry = %s %s", entry.Level, entry.Message)
+	}
+	want := map[string]any{
+		"task":        "sync-users",
+		"error":       "sync batch: [50001] data processing failed: Error 1054",
+		"origin_func": "cron.syncUsers",
+		"failed_sql":  "SELECT 1",
+		"batch":       int64(3),
+	}
+	for k, v := range want {
+		if fields[k] != v {
+			t.Errorf("field %s = %v, want %v", k, fields[k], v)
+		}
+	}
+}
 
 func TestSleepJitterZeroReturnsImmediately(t *testing.T) {
 	start := time.Now()

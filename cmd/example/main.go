@@ -10,13 +10,11 @@ import (
 	"github.com/boloc/go-frame-server/v2/cmd/example/route"
 	"github.com/boloc/go-frame-server/v2/pkg/alert"
 	"github.com/boloc/go-frame-server/v2/pkg/constant"
-	"github.com/boloc/go-frame-server/v2/pkg/errs"
 	"github.com/boloc/go-frame-server/v2/pkg/frame"
 	"github.com/boloc/go-frame-server/v2/pkg/frame/components"
 	"github.com/boloc/go-frame-server/v2/pkg/frame/config"
 	"github.com/boloc/go-frame-server/v2/pkg/frame/webx"
 	"github.com/boloc/go-frame-server/v2/pkg/logger"
-	"github.com/gin-gonic/gin"
 )
 
 // main 展示框架推荐的装配顺序：先显式解析并加载配置，再创建 Frame、注册组件、运行。
@@ -40,19 +38,6 @@ func main() {
 		frame.WithShutdownTimeout(30 * time.Second),
 	)
 
-	// webx.Fail 默认 HTTP 200（业务码在 body.code）。OnFail 比 alert.Event 更精确
-	// （能拿到 *gin.Context + *errs.Error），适合做请求级错误率统计和「按错误码分流告警」；
-	// alert 覆盖后台/异步失败。
-	webx.SetOnFail(func(c *gin.Context, err *errs.Error) {
-		logger.Warn("webx: on_fail",
-			logger.String("route", c.FullPath()),
-			logger.String("client_ip", c.ClientIP()),
-			logger.Int("code", int(err.Code)),
-			logger.String("message", err.Message),
-			logger.String("caller", err.Caller),
-		)
-	})
-
 	// 本地/开发把 Caller 写进失败响应，方便对照 /test/error-source；生产保持默认 false。
 	env := conf.GetString("server.env")
 	if env == constant.EnvLocal || env == constant.EnvDev {
@@ -62,21 +47,12 @@ func main() {
 	// 装配所有组件（日志、MySQL、Redis、ClickHouse、Gin……）。
 	bootstrap.Setup(f, conf)
 
-	// 统一失败通知：框架各处的 alert.Notify 都会进这个 Hook。
+	// 统一失败通知：框架各处的 alert.Notify 都会进这个 Hook。触发方已经打过日志，
+	// Hook 只负责发外部渠道（飞书/企业微信……），不要再写一遍日志。示例没有接渠道。
 	alert.SetHook(func(_ context.Context, e alert.Event) {
-		fields := []logger.Field{
-			logger.String("scope", e.Scope),
-			logger.String("name", e.Name),
-			logger.String("message", e.Message),
-			logger.Err(e.Err),
-			logger.Any("fields", e.Fields),
-			logger.Uint64("dropped_total", alert.Dropped()),
-		}
 		if e.Scope == "lifecycle" {
-			logger.Info("alert: event", fields...)
-			return
+			logger.Info("alert: event", logger.String("name", e.Name), logger.String("message", e.Message))
 		}
-		logger.Error("alert: event", fields...)
 	})
 
 	// 启动后：打印已注册路由数，并确认进程运行所必需的依赖已经连上。

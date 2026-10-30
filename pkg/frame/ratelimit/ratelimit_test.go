@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/boloc/go-frame-server/v2/pkg/alert"
 	"github.com/boloc/go-frame-server/v2/pkg/frame/rediskey"
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
@@ -502,6 +503,38 @@ func TestMiddlewareLayersCountSeparately(t *testing.T) {
 	}
 	if res.Remaining != 8 {
 		t.Fatalf("outer counts each request once: %+v", res)
+	}
+}
+
+func TestMiddlewareCanceledRequestIsNotDegraded(t *testing.T) {
+	l, _ := newMiniLimiter(t)
+	notified := make(chan struct{}, 1)
+	alert.SetHook(func(context.Context, alert.Event) {
+		select {
+		case notified <- struct{}{}:
+		default:
+		}
+	})
+	t.Cleanup(func() { alert.SetHook(nil) })
+
+	r := newEngine(Middleware(Sliding("cancel", 2, time.Minute), WithLimiter(l)))
+	req := httptest.NewRequest(http.MethodGet, "/a", nil)
+	ctx, cancel := context.WithCancel(req.Context())
+	cancel()
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK || w.Body.String() != "ok" {
+		t.Fatalf("canceled request: %d %s", w.Code, w.Body.String())
+	}
+	select {
+	case <-notified:
+		t.Fatal("canceled request raised a ratelimit alert")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	if w := get(r, "/a"); w.Code != http.StatusOK || w.Header().Get("X-RateLimit-Remaining") != "1" {
+		t.Fatalf("canceled request consumed quota: %d %v", w.Code, w.Header())
 	}
 }
 

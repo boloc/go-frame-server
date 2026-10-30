@@ -17,7 +17,6 @@ import (
 	"github.com/boloc/go-frame-server/v2/pkg/logger"
 
 	"github.com/gin-gonic/gin"
-	"go.uber.org/zap"
 )
 
 // GinOption 定义Gin选项函数类型
@@ -218,10 +217,8 @@ func NewGinComponent(opts ...GinOption) *GinComponent {
 	// 创建Gin引擎
 	g.engine = gin.New()
 
-	if g.config.Mode == gin.DebugMode {
-		// 添加日志中间件
-		g.engine.Use(gin.Logger())
-	}
+	// 不挂 gin.Logger()：请求日志统一由 middleware.AccessLog 打（各环境一致、带业务码），
+	// gin.Logger 只认 HTTP 状态码，业务失败也显示 200。
 	// 添加恢复中间件，但不添加日志中间件。
 	// 不用 gin.Recovery()：它把堆栈打到 os.Stderr（DefaultErrorWriter），跟 pkg/logger
 	// 完全是两条通道——生产环境如果只采集应用日志文件、不采集容器标准错误流，panic 现场
@@ -255,10 +252,10 @@ func NewGinComponent(opts ...GinOption) *GinComponent {
 // 保持 components 这一层不依赖更上层的响应约定）。
 func (g *GinComponent) recoverAndLog(c *gin.Context, recovered any) {
 	logger.Error("gin: panic recovered",
-		zap.Any("panic", recovered),
-		zap.String("route", c.FullPath()),
-		zap.String("method", c.Request.Method),
-		zap.String("stack", string(debug.Stack())),
+		logger.Any("panic", recovered),
+		logger.String("route", c.FullPath()),
+		logger.String("method", c.Request.Method),
+		logger.String("stack", string(debug.Stack())),
 	)
 	alert.Notify(c.Request.Context(), alert.Event{
 		Scope: "gin", Name: "panic",
@@ -338,9 +335,9 @@ func (g *GinComponent) Start(ctx context.Context) error {
 
 	// 端口已绑定，Serve 放后台。非 Shutdown 的退出会打日志并 alert.Notify。
 	go func() {
-		logger.Info("gin: server started", zap.String("port", serverPort))
+		logger.Info("gin: server started", logger.String("port", serverPort))
 		if err := g.server.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			logger.Error("gin: server stopped unexpectedly", zap.Error(err))
+			logger.Error("gin: server stopped unexpectedly", logger.Err(err))
 			alert.Notify(context.Background(), alert.Event{
 				Scope: "gin", Name: "serve", Message: "server stopped unexpectedly", Err: err,
 			})
@@ -352,7 +349,7 @@ func (g *GinComponent) Start(ctx context.Context) error {
 
 // Stop 停止Gin组件
 func (g *GinComponent) Stop(ctx context.Context) error {
-	logger.Info("gin: server stopping", zap.String("port", g.config.Port))
+	logger.Info("gin: server stopping", logger.String("port", g.config.Port))
 	if g.server != nil {
 		// 创建带超时的上下文
 		shutdownCtx, cancel := context.WithTimeout(ctx, g.config.ShutdownTimeout)

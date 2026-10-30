@@ -13,7 +13,6 @@ import (
 	"github.com/boloc/go-frame-server/v2/pkg/constant"
 	flog "github.com/boloc/go-frame-server/v2/pkg/logger"
 
-	"go.uber.org/zap"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -34,9 +33,12 @@ type MySQLConfig struct {
 	ConnMaxIdleTime time.Duration
 	// LogLevel GORM 日志级别。SQL 日志经 pkg/logger（zap）落地，见 newGormLogger。
 	LogLevel logger.LogLevel
-	// SlowThreshold 慢查询阈值，超过即以 Warn 记录（任何 LogLevel >= Warn 时生效），默认 200ms。
+	// SlowThreshold 慢查询阈值，超过即以 Warn 记录（任何 LogLevel >= Warn 时生效），默认 500ms。
 	SlowThreshold time.Duration
-	Prefix        string
+	// LogSQLParams 日志里的 SQL 是否带参数值。默认 false 只记 ? 占位符，避免密码哈希、手机号等进日志；
+	// 本地排查需要看具体值时再打开。
+	LogSQLParams bool
+	Prefix       string
 
 	// ConnectRetryAttempts 启动时连接失败的重试次数（含第一次尝试），默认 3。
 	ConnectRetryAttempts int
@@ -160,7 +162,7 @@ func (m *MySQLComponent) Start(ctx context.Context) error {
 			// 从库连不上不阻断启动（读会回落到主库），但必须走正式日志 + 告警：
 			// 否则这个降级只在 stdout 里一闪而过，线上主库负载翻倍却没人知道原因。
 			flog.Warn("mysql: 从库连接失败，跳过该从库继续启动，读请求将回落到主库",
-				zap.Int("slave_index", i), zap.String("dsn", maskDSN(slaveDSN)), zap.Error(err))
+				flog.Int("slave_index", i), flog.String("dsn", maskDSN(slaveDSN)), flog.Err(err))
 			alert.Notify(ctx, alert.Event{
 				Scope: "mysql", Name: "slave_connect", Message: "slave connect failed, skipped", Err: err,
 				Fields: map[string]any{"slave_index": i, "dsn": maskDSN(slaveDSN)},
@@ -191,7 +193,7 @@ func (m *MySQLComponent) connectWithRetry(ctx context.Context, dsn string) (*gor
 // connectDB 连接数据库
 func (m *MySQLComponent) connectDB(ctx context.Context, dsn string) (*gorm.DB, error) {
 	gormConfig := &gorm.Config{
-		Logger:                 newGormLogger("mysql", m.config.LogLevel, m.config.SlowThreshold),
+		Logger:                 newGormLogger("mysql", m.config.LogLevel, m.config.SlowThreshold, m.config.LogSQLParams),
 		SkipDefaultTransaction: m.config.SkipDefaultTransaction == nil || *m.config.SkipDefaultTransaction,
 	}
 

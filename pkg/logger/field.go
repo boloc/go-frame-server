@@ -1,9 +1,12 @@
 package logger
 
 import (
+	"errors"
 	"time"
 
+	"github.com/boloc/go-frame-server/v2/pkg/errs"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 // Field 是一条结构化日志字段。业务代码用本包的构造函数拼字段，不要再 import zap。
@@ -29,5 +32,33 @@ func Time(key string, val time.Time) Field { return zap.Time(key, val) }
 
 func Any(key string, val any) Field { return zap.Any(key, val) }
 
-// Err 对应 zap.Error。不能叫 Error，那个名字已经是打 error 日志的函数。
-func Err(err error) Field { return zap.Error(err) }
+// Err 输出 error 字段。错误链上有 *errs.Error 时再平铺 origin_func、origin（最初出错的位置），
+// 不管错误被包了几层、在哪里打日志，都能直接看到源头。
+// 不用 caller 作键：zap 的 CallerKey 已是 caller（打日志的位置），JSON 里会重名。
+// 不能叫 Error，那个名字已经是打 error 日志的函数。
+func Err(err error) Field {
+	if err == nil {
+		return zap.Skip()
+	}
+	var e *errs.Error
+	if !errors.As(err, &e) || e == nil {
+		return zap.Error(err)
+	}
+	return zap.Inline(errDetail{err: err, origin: e})
+}
+
+type errDetail struct {
+	err    error
+	origin *errs.Error
+}
+
+func (d errDetail) MarshalLogObject(enc zapcore.ObjectEncoder) error {
+	enc.AddString("error", d.err.Error())
+	if d.origin.Func != "" {
+		enc.AddString("origin_func", d.origin.Func)
+	}
+	if d.origin.Caller != "" {
+		enc.AddString("origin", d.origin.Caller)
+	}
+	return nil
+}

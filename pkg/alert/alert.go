@@ -6,7 +6,6 @@ import (
 	"sync/atomic"
 
 	"github.com/boloc/go-frame-server/v2/pkg/logger"
-	"go.uber.org/zap"
 )
 
 // Event 一次失败通知。字段可能为空，Hook 应对空值宽容。
@@ -65,8 +64,8 @@ func Notify(ctx context.Context, e Event) {
 		// 只打首条和每 dropLogEvery 条，防止丢弃风暴把日志也打爆。
 		if n == 1 || n%dropLogEvery == 0 {
 			logger.Warn("alert: too many hooks in flight, dropping event",
-				zap.Uint64("dropped_total", n), zap.Int("max_in_flight", MaxInFlight),
-				zap.String("scope", e.Scope), zap.String("name", e.Name))
+				logger.Uint64("dropped_total", n), logger.Int("max_in_flight", MaxInFlight),
+				logger.String("scope", e.Scope), logger.String("name", e.Name))
 		}
 		return
 	}
@@ -77,7 +76,7 @@ func Notify(ctx context.Context, e Event) {
 		defer func() {
 			if r := recover(); r != nil {
 				logger.Error("alert: hook panicked",
-					zap.Any("panic", r), zap.String("scope", e.Scope), zap.String("name", e.Name))
+					logger.Any("panic", r), logger.String("scope", e.Scope), logger.String("name", e.Name))
 			}
 		}()
 		(*h)(notifyCtx, e)

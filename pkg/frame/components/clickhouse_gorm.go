@@ -32,7 +32,8 @@ type ClickHouseGORMConfig struct {
 	ConnMaxLifetime time.Duration   // 连接最大生命周期
 	ConnMaxIdleTime time.Duration   // 空闲超过该时间后从池中剔除
 	LogLevel        logger.LogLevel // 日志级别，SQL 日志经 pkg/logger 落地，见 newGormLogger
-	SlowThreshold   time.Duration   // 慢查询阈值，默认 200ms
+	SlowThreshold   time.Duration   // 慢查询阈值，默认 500ms
+	LogSQLParams    bool            // 日志里的 SQL 是否带参数值，默认 false 只记 ? 占位符
 	Prefix          string          // 表前缀
 
 	// ConnectRetryAttempts 启动时连接失败的重试次数（含第一次尝试），默认 3。
@@ -170,7 +171,7 @@ func (c *ClickHouseGORMComponent) connect(ctx context.Context) (*gorm.DB, error)
 	}
 
 	gormConfig := &gorm.Config{
-		Logger:                 newGormLogger("clickhouse", c.config.LogLevel, c.config.SlowThreshold),
+		Logger:                 newGormLogger("clickhouse", c.config.LogLevel, c.config.SlowThreshold, c.config.LogSQLParams),
 		SkipDefaultTransaction: c.config.SkipDefaultTransaction == nil || *c.config.SkipDefaultTransaction,
 	}
 	if c.config.Prefix != "" {

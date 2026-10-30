@@ -7,7 +7,6 @@ import (
 
 	"github.com/boloc/go-frame-server/v2/pkg/logger"
 	"github.com/redis/go-redis/v9"
-	"go.uber.org/zap"
 )
 
 // redisZapLogger 把 go-redis 内部日志接到 pkg/logger。
@@ -16,7 +15,7 @@ type redisZapLogger struct{}
 
 func (redisZapLogger) Printf(_ context.Context, format string, v ...any) {
 	// go-redis 的消息本身已带 "redis: " 前缀，这里不再重复加。
-	logger.Warn(fmt.Sprintf(format, v...), zap.String("component", "redis"))
+	logger.Warn(fmt.Sprintf(format, v...), logger.String("component", "redis"))
 }
 
 var redisLoggerOnce sync.Once

@@ -28,7 +28,7 @@ func CapabilitySuccess(c *gin.Context) {
 //
 //	GET /test/not-found
 //	curl -H "X-Demo-Token: x" localhost:10006/test/not-found
-//	# 预期 HTTP 200，code=40400；进程里会打一条 webx: on_fail（webx.SetOnFail）
+//	# 预期 HTTP 200，code=40400；进程里只有一条 WARN http: access（带 error/origin_func/origin）
 func CapabilityNotFound(c *gin.Context) {
 	webx.Fail(c, errs.NotFound("演示用：这个资源不存在"))
 }
@@ -55,7 +55,8 @@ func CapabilityUnauthorized(c *gin.Context) {
 //
 //	GET /test/database-error
 //	curl -H "X-Demo-Token: x" localhost:10006/test/database-error
-//	# 预期 HTTP 200，code=50001；原始 dial 错误不会出现在响应体
+//	# 预期 HTTP 200，code=50001；原始 dial 错误不会出现在响应体。
+//	# 进程里只有一条 ERROR http: access，带 origin_func=handler.CapabilityDatabaseError
 func CapabilityDatabaseError(c *gin.Context) {
 	webx.Fail(c, errs.Database(errors.New("dial tcp 127.0.0.1:3306: connect: connection refused")))
 }
