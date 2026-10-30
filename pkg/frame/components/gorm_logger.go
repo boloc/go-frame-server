@@ -48,7 +48,7 @@ func newGormLogger(component string, level gormlogger.LogLevel, slowThreshold ti
 }
 
 // ParamsFilter 由 GORM 在拼日志用的 SQL 前调用；只影响日志，不影响真正执行的 SQL。
-// 默认不带参数值：密码哈希、手机号、邮箱这类值不进日志。
+// 默认不带参数值，参数里可能有不该进日志的数据。
 func (l *gormZapLogger) ParamsFilter(_ context.Context, sql string, params ...any) (string, []any) {
 	if l.logParams {
 		return sql, params

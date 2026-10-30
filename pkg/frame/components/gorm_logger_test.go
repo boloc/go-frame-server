@@ -59,7 +59,7 @@ func TestGormParamsFilter(t *testing.T) {
 	t.Parallel()
 
 	hidden := newGormLogger("mysql", gormlogger.Warn, time.Second, false).(gorm.ParamsFilter)
-	if sql, params := hidden.ParamsFilter(context.Background(), "INSERT INTO u (phone) VALUES (?)", "13800000000"); params != nil || sql != "INSERT INTO u (phone) VALUES (?)" {
+	if sql, params := hidden.ParamsFilter(context.Background(), "INSERT INTO t (c) VALUES (?)", "v"); params != nil || sql != "INSERT INTO t (c) VALUES (?)" {
 		t.Fatalf("默认不应带参数值，got sql=%q params=%v", sql, params)
 	}
 	shown := newGormLogger("mysql", gormlogger.Warn, time.Second, true).(gorm.ParamsFilter)

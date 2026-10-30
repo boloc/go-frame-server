@@ -35,8 +35,8 @@ type MySQLConfig struct {
 	LogLevel logger.LogLevel
 	// SlowThreshold 慢查询阈值，超过即以 Warn 记录（任何 LogLevel >= Warn 时生效），默认 500ms。
 	SlowThreshold time.Duration
-	// LogSQLParams 日志里的 SQL 是否带参数值。默认 false 只记 ? 占位符，避免密码哈希、手机号等进日志；
-	// 本地排查需要看具体值时再打开。
+	// LogSQLParams 日志里的 SQL 是否带参数值。默认 false 只记 ? 占位符，参数值不进日志；
+	// 排查需要看具体值时再打开。
 	LogSQLParams bool
 	Prefix       string
 

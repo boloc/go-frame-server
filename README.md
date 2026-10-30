@@ -167,7 +167,7 @@ rdb    := frame.GetRedisCmdable()           // 通用 Redis 接口，自动适�
 | 中间件 | 说明 | 示例位置 |
 | --- | --- | --- |
 | `ContextMiddleware` | 生成/回显 `X-Request-Id`，捕获请求体供 `reqctx` 使用 | `cmd/example/bootstrap/gin.go`；字段演示 `/test/reqctx` |
-| `AccessLog` | 结构化访问日志（含 `biz_code`、`request_id`、耗时）；请求流水最高 Warn，不打 Error（失败的 ERROR 由 webx / panic 恢复记录，靠 `request_id` 串联）；默认跳过探针和 `/metrics` | `cmd/example/bootstrap/gin.go`（`WithSlowThreshold(1s)`） |
+| `AccessLog` | 一个请求一条结构化访问日志（含 `biz_code`、`request_id`、耗时、错误详情）；业务码 5xxxx 为 Error，其它失败为 Warn；记录 `query` 和 JSON/表单 `body`，各截断到 4KB（`WithParamMaxBytes`），截断时值末尾带 `…[truncated, N bytes total]` 并加 `query_truncated` / `body_truncated`；要脱敏的字段由业务用 `WithSensitiveKeys` 指定，值记成 `***`，框架不内置；默认跳过探针和 `/metrics` | `cmd/example/bootstrap/gin.go`（`WithSlowThreshold(1s)`） |
 | `MaxBodyBytes` | 限制单次请求体大小（GinComponent 默认 4MB） | 由 `NewGinComponent` 内置挂载；演示 `POST /test/body-limit` |
 | `RequestTimeout` | 给请求 `ctx` 挂整体超时，不写响应 | 由 `NewGinComponent` 按 `server.request_timeout` 挂载；演示 `GET /test/slow` |
 | `monitor.HTTPMetrics` | `http_requests_total` / duration / in-flight，读 `webx.BizCode` | `cmd/example/bootstrap/gin.go` |
@@ -266,7 +266,7 @@ SIGHUP 热重启**默认关闭**。需要时在 `frame.New` 里加 `frame.WithRe
 任何地方用 `logger.Err(err)` 记错误（cron、goroutine、业务日志）都会自动带出 `origin_func` / `origin`。
 - SQL 日志经 `pkg/logger` 落地：有日志作用域时 SQL 错误挂到作用域上（见上条），没有时（启动期、
 自己起的 goroutine）打 ERROR `gorm: sql error`；慢查询超过阈值（`MySQLConfig.SlowThreshold`，默认 500ms）单独打一条 Warn `gorm: slow sql`。
-日志里的 SQL 默认只记 `?` 占位符、不带参数值（密码哈希、手机号不进日志），本地要看具体值时把
+日志里的 SQL 默认只记 `?` 占位符、不带参数值，要看具体值时把
 `MySQLConfig.LogSQLParams` 设为 true。
 `record not found`、ctx 取消/超时不算错误。`server.env: production` 时只记 SQL 错误，慢查询要看
 的话把 GORM 日志级别调到 Warn。

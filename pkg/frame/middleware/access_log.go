@@ -14,9 +14,13 @@ import (
 // AccessLog 在每个请求结束后打一条结构化访问日志（msg 固定 "http: access"），一个请求只有这一条。
 // 请求开始时在 ctx 上开日志作用域：webx 的错误、GORM 的失败 SQL、业务用 logger.AddToScope 挂的字段
 // 都在这一条里带出。级别规则见 accessLogLevel。
+// 请求参数记成 query、body（JSON/表单），各自截断到 WithParamMaxBytes（默认 4KB），
+// 截断时值末尾带 "…[truncated, N bytes total]" 并加 query_truncated / body_truncated；
+// 哪些字段的值要记成 ***，由业务用 WithSensitiveKeys 指定，框架不内置。
 // 与 monitor.HTTPMetrics 都应 Use 在 ContextMiddleware 之后（要拿 request_id/client_ip）、业务路由之前。
 func AccessLog(opts ...AccessLogOption) gin.HandlerFunc {
 	cfg := applyAccessLogOptions(opts...)
+	masker := newParamMasker(cfg.sensitiveKeys)
 	skip := make(map[string]struct{}, len(cfg.skipPaths))
 	for _, p := range cfg.skipPaths {
 		skip[p] = struct{}{}
@@ -36,6 +40,7 @@ func AccessLog(opts ...AccessLogOption) gin.HandlerFunc {
 
 		ctx := logger.NewScope(c.Request.Context())
 		c.Request = c.Request.WithContext(ctx)
+		bc, kind := captureBody(c, cfg.paramMaxBytes)
 
 		start := time.Now()
 		c.Next()
@@ -71,6 +76,7 @@ func AccessLog(opts ...AccessLogOption) gin.HandlerFunc {
 			fields = append(fields, logger.String("errors", errStr))
 		}
 		fields = append(fields, scopeFields...)
+		fields = append(fields, paramFields(c, cfg.paramMaxBytes, masker, bc, kind)...)
 		fields = append(fields,
 			logger.String("client_ip", clientIP),
 			logger.String("request_id", rc.RequestID),
@@ -89,6 +95,8 @@ type AccessLogOption func(*accessLogConfig)
 type accessLogConfig struct {
 	skipPaths     []string
 	slowThreshold time.Duration
+	paramMaxBytes int
+	sensitiveKeys []string
 }
 
 func defaultAccessLogSkipPaths() []string {
@@ -96,7 +104,10 @@ func defaultAccessLogSkipPaths() []string {
 }
 
 func applyAccessLogOptions(opts ...AccessLogOption) accessLogConfig {
-	cfg := accessLogConfig{skipPaths: defaultAccessLogSkipPaths()}
+	cfg := accessLogConfig{
+		skipPaths:     defaultAccessLogSkipPaths(),
+		paramMaxBytes: defaultParamMaxBytes,
+	}
 	for _, opt := range opts {
 		opt(&cfg)
 	}
@@ -107,6 +118,22 @@ func applyAccessLogOptions(opts ...AccessLogOption) accessLogConfig {
 func WithSkipPaths(paths ...string) AccessLogOption {
 	return func(c *accessLogConfig) {
 		c.skipPaths = paths
+	}
+}
+
+// WithParamMaxBytes 设置 query、body 各自最多记录的字节数，超出截断并加 query_truncated / body_truncated。
+// 默认 4096；传 0 或负数不记录 query 和 body。
+func WithParamMaxBytes(n int) AccessLogOption {
+	return func(c *accessLogConfig) {
+		c.paramMaxBytes = n
+	}
+}
+
+// WithSensitiveKeys 指定 query、body 里要脱敏的字段名（不区分大小写，按子串匹配），值记成 ***。
+// 多次调用会合并。不调用时不脱敏。
+func WithSensitiveKeys(keys ...string) AccessLogOption {
+	return func(c *accessLogConfig) {
+		c.sensitiveKeys = append(c.sensitiveKeys, keys...)
 	}
 }
 
